@@ -216,6 +216,57 @@ if __name__ == "__main__":
 
 ![Image Component](../images/Image_component.png)
 
+### `TextArea`
+
+The `TextArea` component displays long, read-only text in the frontend. It is useful
+for logs, reports, status messages, generated text, and other output that does not fit
+comfortably in the standard single-line string component.
+
+```python
+import pydase
+from pydase.components import TextArea
+
+
+class MyDataService(pydase.DataService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.report = TextArea(height=360, monospace=True)
+
+    def refresh_report(self) -> None:
+        self.report.set_text("Acquisition summary\n\nNo warnings.")
+        self.report.append("\nFinished successfully.")
+```
+
+### `Table`
+
+The `Table` component displays read-only tabular output in the frontend. Rows can be
+provided as dictionaries or as sequences with explicit column names.
+
+```python
+import pydase
+from pydase.components import Table
+
+
+class MyDataService(pydase.DataService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.results = Table(
+            rows=[
+                {"channel": "A", "voltage": 1.2, "enabled": True},
+                {"channel": "B", "voltage": 1.5, "enabled": False},
+            ],
+            max_height=360,
+            width="max-content",
+            cell_padding="0.75rem 1.75rem 0.75rem 0.75rem",
+            max_cell_width="24rem",
+        )
+
+    def add_result(self, channel: str, voltage: float) -> None:
+        self.results.append_row(
+            {"channel": channel, "voltage": voltage, "enabled": True}
+        )
+```
+
 ### `NumberSlider`
 
 The `NumberSlider` component in the `pydase` package provides an interactive slider interface for adjusting numerical values on the frontend. It is designed to support both numbers and quantities and ensures that values adjusted on the frontend are synchronized with the backend.
@@ -432,4 +483,3 @@ This means that you should use different colour formats when you want to use a c
 ### Extending with New Components
 
 Users can also extend the library by creating custom components. This involves defining the behavior on the Python backend and the visual representation on the frontend. For those looking to introduce new components, the [guide on adding components](https://pydase.readthedocs.io/en/latest/dev-guide/Adding_Components/) provides detailed steps on achieving this.
-

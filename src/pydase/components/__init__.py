@@ -31,10 +31,14 @@ from pydase.components.coloured_enum import ColouredEnum
 from pydase.components.device_connection import DeviceConnection
 from pydase.components.image import Image
 from pydase.components.number_slider import NumberSlider
+from pydase.components.table import Table
+from pydase.components.text_area import TextArea
 
 __all__ = [
     "ColouredEnum",
     "DeviceConnection",
     "Image",
     "NumberSlider",
+    "Table",
+    "TextArea",
 ]

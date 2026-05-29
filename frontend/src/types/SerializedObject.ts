@@ -82,6 +82,8 @@ type DataServiceTypes =
   | "Image"
   | "NumberSlider"
   | "DeviceConnection"
+  | "Table"
+  | "TextArea"
   | "Task";
 
 type SerializedDataService = SerializedObjectBase & {

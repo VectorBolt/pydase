@@ -32,6 +32,70 @@ input.instantUpdate {
 .dataServiceComponent {
   width: 100%;
 }
+.textAreaComponent,
+.tableComponent {
+  box-sizing: border-box;
+  width: 100%;
+}
+.pydase-component-header {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+.pydase-component-actions {
+  align-items: center;
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+.pydase-text-area-output {
+  min-height: 120px;
+  resize: vertical;
+}
+.pydase-text-area-output.lineWrap {
+  white-space: pre-wrap;
+}
+.pydase-text-area-output.noLineWrap {
+  overflow-x: auto;
+  white-space: pre;
+  word-break: normal;
+}
+.pydase-text-area-output.monospace {
+  font-family: var(--bs-font-monospace);
+}
+.pydase-table-scroll {
+  overflow: auto;
+}
+.pydase-output-table {
+  table-layout: auto;
+  width: var(--pydase-table-width, max-content) !important;
+}
+.pydase-table-scroll thead th {
+  background: var(--bs-body-bg);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.pydase-table-scroll td,
+.pydase-table-scroll th {
+  max-width: var(--pydase-table-max-cell-width, 32rem);
+  overflow: hidden;
+  padding: var(
+    --pydase-table-cell-padding,
+    0.75rem 1.75rem 0.75rem 0.75rem
+  );
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pydase-table-scroll .numericCell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pydase-table-scroll .booleanCell {
+  text-align: center;
+}
 .deviceConnectionComponent {
   position: relative;
   float: left !important;

@@ -99,7 +99,13 @@ class SerializedException(SerializedObjectBase):
 
 
 DataServiceTypes = Literal[
-    "DataService", "Image", "NumberSlider", "DeviceConnection", "Task"
+    "DataService",
+    "Image",
+    "NumberSlider",
+    "DeviceConnection",
+    "Table",
+    "TextArea",
+    "Task",
 ]
 
 

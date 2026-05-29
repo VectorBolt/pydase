@@ -9,6 +9,8 @@ import { ListComponent } from "./ListComponent";
 import { DataServiceComponent, DataServiceJSON } from "./DataServiceComponent";
 import { DeviceConnectionComponent } from "./DeviceConnection";
 import { ImageComponent } from "./ImageComponent";
+import { TableComponent } from "./TableComponent";
+import { TextAreaComponent } from "./TextAreaComponent";
 import { LevelName } from "./NotificationsComponent";
 import { getIdFromFullAccessPath } from "../utils/stringUtils";
 import { WebSettingsContext } from "../WebSettings";
@@ -230,6 +232,36 @@ export const GenericComponent = React.memo(
           addNotification={addNotification}
           value={attribute.value["value"]["value"] as string}
           format={attribute.value["format"]["value"] as string}
+        />
+      );
+    } else if (attribute.type === "TextArea") {
+      return (
+        <TextAreaComponent
+          fullAccessPath={fullAccessPath}
+          docString={attribute.value["value"].doc}
+          displayName={displayName}
+          id={id}
+          addNotification={addNotification}
+          value={attribute.value["value"]["value"] as string}
+          height={Number(attribute.value["height"]["value"])}
+          lineWrap={Boolean(attribute.value["line_wrap"]["value"])}
+          monospace={Boolean(attribute.value["monospace"]["value"])}
+        />
+      );
+    } else if (attribute.type === "Table") {
+      return (
+        <TableComponent
+          fullAccessPath={fullAccessPath}
+          docString={attribute.value["rows"].doc}
+          displayName={displayName}
+          id={id}
+          addNotification={addNotification}
+          columns={attribute.value["columns"] as SerializedObject}
+          rows={attribute.value["rows"] as SerializedObject}
+          maxHeight={Number(attribute.value["max_height"]["value"])}
+          width={attribute.value["width"]["value"] as string}
+          cellPadding={attribute.value["cell_padding"]["value"] as string}
+          maxCellWidth={attribute.value["max_cell_width"]["value"] as string}
         />
       );
     } else {
