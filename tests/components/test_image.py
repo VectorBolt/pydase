@@ -3,7 +3,7 @@ import sys
 import zlib
 from pathlib import Path
 
-from pytest import LogCaptureFixture, MonkeyPatch
+from pytest import LogCaptureFixture, MonkeyPatch, raises
 
 import pydase
 import pydase.components
@@ -123,6 +123,79 @@ def test_image_loads_camera_frame_like_array() -> None:
     assert base64.b64decode(service.camera.value) == frame_data
 
 
+def test_image_overlay_management() -> None:
+    image = pydase.components.Image()
+    image.set_overlays(
+        [
+            {"type": "GRID", "spacing": 32, "color": "#ffffff66"},
+            {
+                "type": "rect",
+                "x": 12,
+                "y": 8,
+                "width": 40,
+                "height": 30,
+                "color": "#00ff88",
+                "line_width": 2,
+            },
+        ]
+    )
+
+    assert image.overlays == [
+        {"type": "grid", "spacing": 32, "color": "#ffffff66"},
+        {
+            "type": "rect",
+            "x": 12,
+            "y": 8,
+            "width": 40,
+            "height": 30,
+            "color": "#00ff88",
+            "line_width": 2,
+        },
+    ]
+
+    image.add_overlay({"type": "cross", "x": 32, "y": 24, "size": 6})
+
+    assert image.overlays[-1] == {"type": "cross", "x": 32, "y": 24, "size": 6}
+
+    image.clear_overlays()
+
+    assert image.overlays == []
+
+
+def test_image_overlay_update_notifies_observer_once() -> None:
+    class MyService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.my_image = pydase.components.Image()
+
+    service_instance = MyService()
+    state_manager = StateManager(service_instance)
+    observer = DataServiceObserver(state_manager)
+    notifications: list[str] = []
+    observer.add_notification_callback(
+        lambda full_access_path, _value, _cached_value_dict: notifications.append(
+            full_access_path
+        )
+    )
+
+    service_instance.my_image.set_overlays([{"type": "cross", "x": 32, "y": 24}])
+
+    assert notifications == ["my_image.overlays"]
+
+
+def test_image_overlay_validation() -> None:
+    image = pydase.components.Image()
+
+    with raises(ValueError, match="Unsupported overlay type"):
+        image.set_overlays([{"type": "polygon"}])
+
+    with raises(ValueError, match="missing required"):
+        image.set_overlays([{"type": "rect", "x": 1, "y": 2}])
+
+    with raises(TypeError, match="must be a number"):
+        image.set_overlays([{"type": "cross", "x": "1", "y": 2}])
+
+
 def test_image_load_from_array_as_png() -> None:
     image = pydase.components.Image()
 
@@ -167,6 +240,8 @@ def test_image_serialization() -> None:
     assert image["type"] == "Image"
 
     assert set(image_value) == {
+        "add_overlay",
+        "clear_overlays",
         "color_mode",
         "format",
         "height",
@@ -176,6 +251,8 @@ def test_image_serialization() -> None:
         "load_from_path",
         "load_from_url",
         "save_to_png",
+        "set_overlays",
+        "overlays",
         "to_png_bytes",
         "value",
         "width",
@@ -185,6 +262,7 @@ def test_image_serialization() -> None:
     assert image_value["width"]["value"] == 0
     assert image_value["height"]["value"] == 0
     assert image_value["color_mode"]["value"] == ""
+    assert image_value["overlays"]["value"] == []
 
     assert image_value["load_from_array"]["signature"]["parameters"] == {
         "array": {"annotation": "typing.Any", "default": {}},

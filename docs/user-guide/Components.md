@@ -185,6 +185,17 @@ This component provides a versatile interface for displaying images within the a
 
 The component offers methods to load images seamlessly, ensuring that visual content is easily integrated and displayed within the data service.
 
+For live camera-style data, `load_from_array` accepts ndarray-like `uint8` objects with
+`shape`, `dtype`, and `tobytes()` attributes. Supported shapes are `(height, width)`,
+`(height, width, 1)`, `(height, width, 3)`, and `(height, width, 4)`. Three-channel
+arrays are interpreted as RGB by default; pass `color_mode="BGR"` for OpenCV-style
+frames.
+
+Images can also render lightweight overlays in the frontend without modifying the
+underlying image pixels. Overlay coordinates are image pixel coordinates, so they stay
+aligned when the browser scales the image. Supported overlay types are `grid`, `ticks`,
+`rect`, `circle`, `cross`, `point`, `line`, and `text`.
+
 ```python
 import matplotlib.pyplot as plt
 import numpy as np
@@ -217,6 +228,23 @@ if __name__ == "__main__":
 
     # OpenCV-style arrays can be passed without copying channels manually
     service.my_image.load_from_array(frame, color_mode="BGR")
+
+    # overlays are rendered in the browser on top of the image pixels
+    service.my_image.set_overlays(
+        [
+            {"type": "grid", "spacing": 50, "color": "#ffffff44"},
+            {
+                "type": "rect",
+                "x": 120,
+                "y": 90,
+                "width": 80,
+                "height": 60,
+                "color": "#00ff88",
+                "line_width": 2,
+            },
+            {"type": "cross", "x": 160, "y": 120, "size": 8, "color": "#ffcc00"},
+        ]
+    )
 
     # save the latest raw frame as PNG when needed
     service.my_image.save_to_png("/your/image/path/snapshot.png")

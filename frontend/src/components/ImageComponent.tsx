@@ -1,9 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Card, Collapse, Image } from "react-bootstrap";
+import { Card, Collapse, Image as BootstrapImage } from "react-bootstrap";
 import { DocStringComponent } from "./DocStringComponent";
 import { ChevronDown, ChevronRight } from "react-bootstrap-icons";
 import { LevelName } from "./NotificationsComponent";
 import useRenderCount from "../hooks/useRenderCount";
+
+type OverlayValue = string | number | boolean | null;
+
+export interface ImageOverlay {
+  type: string;
+  [key: string]: OverlayValue;
+}
 
 interface ImageComponentProps {
   fullAccessPath: string;
@@ -13,6 +20,7 @@ interface ImageComponentProps {
   width: number;
   height: number;
   colorMode: string;
+  overlays: ImageOverlay[];
   addNotification: (message: string, levelname?: LevelName) => void;
   displayName: string;
   id: string;
@@ -79,6 +87,190 @@ const convertRawImageToRgba = (
   return rgba;
 };
 
+const getNumber = (overlay: ImageOverlay, key: string, fallback: number): number => {
+  const value = overlay[key];
+  return typeof value === "number" ? value : fallback;
+};
+
+const getString = (overlay: ImageOverlay, key: string, fallback: string): string => {
+  const value = overlay[key];
+  return typeof value === "string" ? value : fallback;
+};
+
+const getBoolean = (overlay: ImageOverlay, key: string, fallback: boolean): boolean => {
+  const value = overlay[key];
+  return typeof value === "boolean" ? value : fallback;
+};
+
+const applyOverlayStyle = (
+  context: CanvasRenderingContext2D,
+  overlay: ImageOverlay,
+): void => {
+  const color = getString(overlay, "color", "#00ff88");
+  context.globalAlpha = getNumber(overlay, "opacity", 1);
+  context.strokeStyle = color;
+  context.fillStyle = getString(overlay, "fill_color", color);
+  context.lineWidth = getNumber(overlay, "line_width", 1);
+  context.font = getString(
+    overlay,
+    "font",
+    `${getNumber(overlay, "font_size", 11)}px sans-serif`,
+  );
+};
+
+const drawLine = (
+  context: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): void => {
+  context.beginPath();
+  context.moveTo(x1, y1);
+  context.lineTo(x2, y2);
+  context.stroke();
+};
+
+const drawGridOverlay = (
+  context: CanvasRenderingContext2D,
+  overlay: ImageOverlay,
+  imageWidth: number,
+  imageHeight: number,
+): void => {
+  const spacing = getNumber(overlay, "spacing", 32);
+  const xSpacing = getNumber(overlay, "x_spacing", spacing);
+  const ySpacing = getNumber(overlay, "y_spacing", spacing);
+
+  if (xSpacing <= 0 || ySpacing <= 0) {
+    return;
+  }
+
+  for (let x = 0; x <= imageWidth; x += xSpacing) {
+    drawLine(context, x, 0, x, imageHeight);
+  }
+  for (let y = 0; y <= imageHeight; y += ySpacing) {
+    drawLine(context, 0, y, imageWidth, y);
+  }
+};
+
+const drawTicksOverlay = (
+  context: CanvasRenderingContext2D,
+  overlay: ImageOverlay,
+  imageWidth: number,
+  imageHeight: number,
+): void => {
+  const spacing = getNumber(overlay, "spacing", 32);
+  const xSpacing = getNumber(overlay, "x_spacing", spacing);
+  const ySpacing = getNumber(overlay, "y_spacing", spacing);
+  const tickLength = getNumber(overlay, "tick_length", 6);
+  const showLabels = getBoolean(overlay, "show_labels", true);
+  const labelEvery = getNumber(overlay, "label_every", spacing);
+
+  if (xSpacing <= 0 || ySpacing <= 0 || labelEvery <= 0) {
+    return;
+  }
+
+  for (let x = 0; x <= imageWidth; x += xSpacing) {
+    drawLine(context, x, 0, x, tickLength);
+    drawLine(context, x, imageHeight, x, imageHeight - tickLength);
+    if (showLabels && x % labelEvery === 0) {
+      context.fillText(String(x), x + 2, tickLength + 10);
+    }
+  }
+
+  for (let y = 0; y <= imageHeight; y += ySpacing) {
+    drawLine(context, 0, y, tickLength, y);
+    drawLine(context, imageWidth, y, imageWidth - tickLength, y);
+    if (showLabels && y % labelEvery === 0) {
+      context.fillText(String(y), tickLength + 2, y - 2);
+    }
+  }
+};
+
+const drawOverlay = (
+  context: CanvasRenderingContext2D,
+  overlay: ImageOverlay,
+  imageWidth: number,
+  imageHeight: number,
+): void => {
+  context.save();
+  applyOverlayStyle(context, overlay);
+
+  const type = overlay.type.toLowerCase();
+  if (type === "grid") {
+    drawGridOverlay(context, overlay, imageWidth, imageHeight);
+  } else if (type === "ticks") {
+    drawTicksOverlay(context, overlay, imageWidth, imageHeight);
+  } else if (type === "rect") {
+    const x = getNumber(overlay, "x", 0);
+    const y = getNumber(overlay, "y", 0);
+    const rectWidth = getNumber(overlay, "width", 0);
+    const rectHeight = getNumber(overlay, "height", 0);
+    if (typeof overlay.fill_color === "string") {
+      context.fillRect(x, y, rectWidth, rectHeight);
+    }
+    context.strokeRect(x, y, rectWidth, rectHeight);
+  } else if (type === "circle") {
+    context.beginPath();
+    context.arc(
+      getNumber(overlay, "x", 0),
+      getNumber(overlay, "y", 0),
+      getNumber(overlay, "radius", 1),
+      0,
+      Math.PI * 2,
+    );
+    if (typeof overlay.fill_color === "string") {
+      context.fill();
+    }
+    context.stroke();
+  } else if (type === "cross") {
+    const x = getNumber(overlay, "x", 0);
+    const y = getNumber(overlay, "y", 0);
+    const size = getNumber(overlay, "size", 8);
+    drawLine(context, x - size, y, x + size, y);
+    drawLine(context, x, y - size, x, y + size);
+  } else if (type === "point") {
+    context.beginPath();
+    context.arc(
+      getNumber(overlay, "x", 0),
+      getNumber(overlay, "y", 0),
+      getNumber(overlay, "radius", 3),
+      0,
+      Math.PI * 2,
+    );
+    context.fillStyle = getString(overlay, "color", "#00ff88");
+    context.fill();
+  } else if (type === "line") {
+    drawLine(
+      context,
+      getNumber(overlay, "x1", 0),
+      getNumber(overlay, "y1", 0),
+      getNumber(overlay, "x2", 0),
+      getNumber(overlay, "y2", 0),
+    );
+  } else if (type === "text") {
+    context.fillStyle = getString(overlay, "color", "#00ff88");
+    context.fillText(
+      getString(overlay, "text", ""),
+      getNumber(overlay, "x", 0),
+      getNumber(overlay, "y", 0),
+    );
+  }
+
+  context.restore();
+};
+
+const drawOverlays = (
+  context: CanvasRenderingContext2D,
+  overlays: ImageOverlay[],
+  imageWidth: number,
+  imageHeight: number,
+): void => {
+  for (const overlay of overlays) {
+    drawOverlay(context, overlay, imageWidth, imageHeight);
+  }
+};
+
 export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const {
     fullAccessPath,
@@ -88,6 +280,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     width,
     height,
     colorMode,
+    overlays,
     addNotification,
     displayName,
     id,
@@ -97,19 +290,21 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const [open, setOpen] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isRawImage = format.toUpperCase() === "RAW";
+  const shouldRenderCanvas = isRawImage || overlays.length > 0;
 
   useEffect(() => {
     addNotification(`${fullAccessPath} changed.`);
   }, [addNotification, fullAccessPath, props.value]);
 
   useEffect(() => {
-    if (!isRawImage || !value || width <= 0 || height <= 0) {
+    if (!shouldRenderCanvas || !value) {
       return;
     }
 
+    let cancelled = false;
     const animationId = window.requestAnimationFrame(() => {
       const canvas = canvasRef.current;
-      if (!canvas) {
+      if (!canvas || cancelled) {
         return;
       }
 
@@ -119,18 +314,48 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
           return;
         }
 
-        canvas.width = width;
-        canvas.height = height;
-        const bytes = decodeBase64(value);
-        const rgba = convertRawImageToRgba(bytes, width, height, colorMode);
-        context.putImageData(new ImageData(rgba, width, height), 0, 0);
+        if (isRawImage) {
+          if (width <= 0 || height <= 0) {
+            return;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const bytes = decodeBase64(value);
+          const rgba = convertRawImageToRgba(bytes, width, height, colorMode);
+          context.putImageData(new ImageData(rgba, width, height), 0, 0);
+          drawOverlays(context, overlays, width, height);
+        } else {
+          const image = new window.Image();
+          image.onload = () => {
+            if (cancelled) {
+              return;
+            }
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+            context.drawImage(image, 0, 0);
+            drawOverlays(context, overlays, image.naturalWidth, image.naturalHeight);
+          };
+          image.src = `data:image/${format.toLowerCase()};base64,${value}`;
+        }
       } catch (error) {
-        console.error("Failed to render raw image data:", error);
+        console.error("Failed to render image data:", error);
       }
     });
 
-    return () => window.cancelAnimationFrame(animationId);
-  }, [colorMode, height, isRawImage, value, width]);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(animationId);
+    };
+  }, [
+    colorMode,
+    format,
+    height,
+    isRawImage,
+    overlays,
+    shouldRenderCanvas,
+    value,
+    width,
+  ]);
 
   return (
     <div className="component imageComponent" id={id}>
@@ -150,7 +375,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
             )}
             {format === "" && value === "" ? (
               <p>No image set in the backend.</p>
-            ) : isRawImage ? (
+            ) : shouldRenderCanvas ? (
               <canvas
                 ref={canvasRef}
                 width={width}
@@ -158,7 +383,8 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
                 style={{ maxWidth: "100%", height: "auto" }}
               />
             ) : (
-              <Image src={`data:image/${format.toLowerCase()};base64,${value}`}></Image>
+              <BootstrapImage
+                src={`data:image/${format.toLowerCase()};base64,${value}`}></BootstrapImage>
             )}
           </Card.Body>
         </Collapse>

@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from pathlib import Path
@@ -5,6 +6,9 @@ from pathlib import Path
 import pydase
 from pydase.components import Image
 from pydase.utils.decorators import frontend
+
+import logging
+logging.getLogger("pydase").setLevel(logging.INFO)
 
 
 class CameraFrame:
@@ -44,8 +48,68 @@ class LiveCameraImageDemo(pydase.DataService):
                     offset += 3
 
             self.camera.load_from_array(CameraFrame(width, height, bytes(frame_data)))
+            self.camera.set_overlays(self._build_overlays(width, height))
             self.frame_count += 1
             time.sleep(1 / 20)
+
+    def _build_overlays(
+        self, width: int, height: int
+    ) -> list[dict[str, str | int | float | bool]]:
+        center_x = 48 + (self.frame_count * 3) % (width - 96)
+        center_y = height // 2 + round(42 * math.sin(self.frame_count * 0.1))
+        box_width = 58
+        box_height = 42
+
+        return [
+            {
+                "type": "grid",
+                "spacing": 32,
+                "color": "#ffffff33",
+                "line_width": 1,
+            },
+            {
+                "type": "ticks",
+                "spacing": 32,
+                "label_every": 64,
+                "tick_length": 7,
+                "show_labels": True,
+                "color": "#ffffffaa",
+                "font_size": 10,
+            },
+            {
+                "type": "rect",
+                "x": center_x - box_width // 2,
+                "y": center_y - box_height // 2,
+                "width": box_width,
+                "height": box_height,
+                "color": "#00ff88",
+                "line_width": 2,
+            },
+            {
+                "type": "circle",
+                "x": center_x,
+                "y": center_y,
+                "radius": 22,
+                "color": "#ffcc00",
+                "line_width": 2,
+            },
+            {
+                "type": "cross",
+                "x": center_x,
+                "y": center_y,
+                "size": 9,
+                "color": "#ff3355",
+                "line_width": 2,
+            },
+            {
+                "type": "text",
+                "x": 8,
+                "y": height - 10,
+                "text": f"frame {self.frame_count}",
+                "color": "#ffffff",
+                "font_size": 12,
+            },
+        ]
 
     @frontend
     def save_snapshot(self) -> None:

@@ -3,14 +3,18 @@ import io
 import logging
 import struct
 import zlib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 from urllib.request import urlopen
 
 from pydase.data_service.data_service import DataService
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
+
+OverlayValue: TypeAlias = str | int | float | bool | None
+ImageOverlay: TypeAlias = dict[str, OverlayValue]
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +31,54 @@ class Image(DataService):
         "RGBA": 4,
         "BGRA": 4,
     }
+    _SUPPORTED_OVERLAY_TYPES: ClassVar[set[str]] = {
+        "circle",
+        "cross",
+        "grid",
+        "line",
+        "point",
+        "rect",
+        "text",
+        "ticks",
+    }
+    _REQUIRED_OVERLAY_KEYS: ClassVar[dict[str, set[str]]] = {
+        "circle": {"x", "y", "radius"},
+        "cross": {"x", "y"},
+        "grid": set(),
+        "line": {"x1", "y1", "x2", "y2"},
+        "point": {"x", "y"},
+        "rect": {"x", "y", "width", "height"},
+        "text": {"x", "y", "text"},
+        "ticks": set(),
+    }
+    _NUMERIC_OVERLAY_KEYS: ClassVar[set[str]] = {
+        "font_size",
+        "height",
+        "label_every",
+        "line_width",
+        "opacity",
+        "radius",
+        "size",
+        "spacing",
+        "tick_length",
+        "width",
+        "x",
+        "x1",
+        "x2",
+        "x_spacing",
+        "y",
+        "y1",
+        "y2",
+        "y_spacing",
+    }
+    _STRING_OVERLAY_KEYS: ClassVar[set[str]] = {
+        "color",
+        "fill_color",
+        "font",
+        "text",
+        "type",
+    }
+    _BOOLEAN_OVERLAY_KEYS: ClassVar[set[str]] = {"show_labels"}
 
     def __init__(self) -> None:
         super().__init__()
@@ -35,6 +87,7 @@ class Image(DataService):
         self._width: int = 0
         self._height: int = 0
         self._color_mode: str = ""
+        self._overlays: list[ImageOverlay] = []
 
     @property
     def value(self) -> str:
@@ -55,6 +108,11 @@ class Image(DataService):
     @property
     def color_mode(self) -> str:
         return self._color_mode
+
+    @property
+    def overlays(self) -> list[ImageOverlay]:
+        overlays = self._overlays
+        return [dict(overlay) for overlay in overlays]
 
     def load_from_path(self, path: Path | str) -> None:
         with open(path, "rb") as image_file:
@@ -147,6 +205,29 @@ class Image(DataService):
     def save_to_png(self, path: Path | str) -> None:
         Path(path).write_bytes(self.to_png_bytes())
 
+    def set_overlays(self, overlays: list[ImageOverlay]) -> None:
+        """Replace the overlays rendered on top of the image.
+
+        Overlay coordinates are expressed in image pixel coordinates. Supported
+        overlay types are ``grid``, ``ticks``, ``rect``, ``circle``, ``cross``,
+        ``point``, ``line``, and ``text``.
+        """
+
+        normalised_overlays = [
+            self._normalise_overlay(overlay) for overlay in overlays
+        ]
+        self._set_overlays_if_changed(normalised_overlays)
+
+    def add_overlay(self, overlay: ImageOverlay) -> None:
+        """Append one overlay to the current overlay list."""
+
+        self.set_overlays([*self._overlays, overlay])
+
+    def clear_overlays(self) -> None:
+        """Remove all overlays from the image."""
+
+        self._set_overlays_if_changed([])
+
     def _load_from_base64(
         self,
         value_: bytes,
@@ -178,6 +259,82 @@ class Image(DataService):
     def _set_if_changed(self, name: str, value: Any) -> None:
         if getattr(self, name) != value:
             setattr(self, name, value)
+
+    def _set_overlays_if_changed(self, overlays: list[ImageOverlay]) -> None:
+        if self._overlays == overlays:
+            return
+
+        self._notify_change_start("overlays")
+        object.__setattr__(self, "_overlays", overlays)
+        self._notify_changed("overlays", [dict(overlay) for overlay in overlays])
+
+    def _normalise_overlay(self, overlay: Mapping[str, Any]) -> ImageOverlay:
+        if not isinstance(overlay, Mapping):
+            raise TypeError("Each overlay must be a dictionary-like object.")
+
+        overlay_type = overlay.get("type")
+        if not isinstance(overlay_type, str):
+            raise ValueError("Each overlay must include a string 'type' field.")
+
+        overlay_type = overlay_type.lower()
+        if overlay_type not in self._SUPPORTED_OVERLAY_TYPES:
+            supported_types = ", ".join(sorted(self._SUPPORTED_OVERLAY_TYPES))
+            raise ValueError(
+                f"Unsupported overlay type. Use one of: {supported_types}."
+            )
+
+        missing_keys = self._REQUIRED_OVERLAY_KEYS[overlay_type] - overlay.keys()
+        if missing_keys:
+            missing_keys_str = ", ".join(sorted(missing_keys))
+            raise ValueError(
+                f"Overlay type {overlay_type!r} is missing required key(s): "
+                f"{missing_keys_str}."
+            )
+
+        normalised_overlay: ImageOverlay = {"type": overlay_type}
+        for key, value in overlay.items():
+            if key == "type":
+                continue
+            normalised_overlay[key] = self._normalise_overlay_value(key, value)
+        return normalised_overlay
+
+    def _normalise_overlay_value(self, key: str, value: Any) -> OverlayValue:
+        if value is None:
+            return None
+
+        if key in self._BOOLEAN_OVERLAY_KEYS:
+            return self._normalise_bool_overlay_value(key, value)
+
+        if key in self._NUMERIC_OVERLAY_KEYS:
+            return self._normalise_numeric_overlay_value(key, value)
+
+        if key in self._STRING_OVERLAY_KEYS:
+            return self._normalise_string_overlay_value(key, value)
+
+        if isinstance(value, str | int | float | bool):
+            return value
+
+        raise TypeError(
+            f"Overlay key {key!r} must be a string, number, bool, or None."
+        )
+
+    @staticmethod
+    def _normalise_bool_overlay_value(key: str, value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        raise TypeError(f"Overlay key {key!r} must be a bool.")
+
+    @staticmethod
+    def _normalise_numeric_overlay_value(key: str, value: Any) -> int | float:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return value
+        raise TypeError(f"Overlay key {key!r} must be a number.")
+
+    @staticmethod
+    def _normalise_string_overlay_value(key: str, value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        raise TypeError(f"Overlay key {key!r} must be a string.")
 
     def _get_raw_image_metadata(
         self,

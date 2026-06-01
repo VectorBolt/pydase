@@ -8,7 +8,7 @@ import { StringComponent } from "./StringComponent";
 import { ListComponent } from "./ListComponent";
 import { DataServiceComponent, DataServiceJSON } from "./DataServiceComponent";
 import { DeviceConnectionComponent } from "./DeviceConnection";
-import { ImageComponent } from "./ImageComponent";
+import { ImageComponent, ImageOverlay } from "./ImageComponent";
 import { TableComponent } from "./TableComponent";
 import { TextAreaComponent } from "./TextAreaComponent";
 import { LevelName } from "./NotificationsComponent";
@@ -56,6 +56,46 @@ function changeCallback(
 ) {
   updateValue(value, callback);
 }
+
+const deserializeImageOverlayValue = (
+  attribute: SerializedObject,
+): string | number | boolean | null => {
+  if (
+    attribute.type === "str" ||
+    attribute.type === "int" ||
+    attribute.type === "float" ||
+    attribute.type === "bool" ||
+    attribute.type === "NoneType" ||
+    attribute.type === "None"
+  ) {
+    return attribute.value;
+  }
+
+  return null;
+};
+
+const deserializeImageOverlay = (attribute: SerializedObject): ImageOverlay | null => {
+  if (attribute.type !== "dict") {
+    return null;
+  }
+
+  const overlay: ImageOverlay = { type: "" };
+  for (const [key, value] of Object.entries(attribute.value)) {
+    overlay[key] = deserializeImageOverlayValue(value);
+  }
+
+  return overlay.type === "" ? null : overlay;
+};
+
+const deserializeImageOverlays = (attribute: SerializedObject): ImageOverlay[] => {
+  if (attribute.type !== "list") {
+    return [];
+  }
+
+  return attribute.value
+    .map(deserializeImageOverlay)
+    .filter((overlay): overlay is ImageOverlay => overlay !== null);
+};
 
 export const GenericComponent = React.memo(
   ({ attribute, isInstantUpdate, addNotification }: GenericComponentProps) => {
@@ -235,6 +275,7 @@ export const GenericComponent = React.memo(
           width={Number(attribute.value["width"]["value"])}
           height={Number(attribute.value["height"]["value"])}
           colorMode={attribute.value["color_mode"]["value"] as string}
+          overlays={deserializeImageOverlays(attribute.value["overlays"])}
         />
       );
     } else if (attribute.type === "TextArea") {
