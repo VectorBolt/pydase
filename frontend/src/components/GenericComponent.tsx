@@ -232,6 +232,9 @@ export const GenericComponent = React.memo(
           addNotification={addNotification}
           value={attribute.value["value"]["value"] as string}
           format={attribute.value["format"]["value"] as string}
+          width={Number(attribute.value["width"]["value"])}
+          height={Number(attribute.value["height"]["value"])}
+          colorMode={attribute.value["color_mode"]["value"] as string}
         />
       );
     } else if (attribute.type === "TextArea") {

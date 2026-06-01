@@ -211,6 +211,16 @@ if __name__ == "__main__":
     plt.grid()
     service.my_image.load_from_matplotlib_figure(fig)
 
+    # lossless live image data from a NumPy array, rendered via canvas in the browser
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    service.my_image.load_from_array(frame)  # RGB by default
+
+    # OpenCV-style arrays can be passed without copying channels manually
+    service.my_image.load_from_array(frame, color_mode="BGR")
+
+    # save the latest raw frame as PNG when needed
+    service.my_image.save_to_png("/your/image/path/snapshot.png")
+
     pydase.Server(service).run()
 ```
 

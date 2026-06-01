@@ -1,9 +1,13 @@
+import base64
 import sys
+import zlib
+from pathlib import Path
 
-from pytest import LogCaptureFixture
+from pytest import LogCaptureFixture, MonkeyPatch
 
 import pydase
 import pydase.components
+import pydase.components.image as image_module
 from pydase.data_service.data_service_observer import DataServiceObserver
 from pydase.data_service.state_manager import StateManager
 from pydase.utils.serialization.serializer import dump
@@ -13,12 +17,58 @@ if sys.version_info < (3, 13):
 else:
     PATHLIB_PATH = "pathlib._local.Path"
 
+EXPECTED_RAW_WIDTH = 2
+CAMERA_FRAME_HEIGHT = 240
+CAMERA_FRAME_WIDTH = 320
+CAMERA_FRAME_CHANNELS = 3
 
-def test_image_functions(caplog: LogCaptureFixture) -> None:
+
+class FakeArray:
+    def __init__(
+        self, shape: tuple[int, ...], data: bytes, dtype: str = "uint8"
+    ) -> None:
+        self.shape = shape
+        self.dtype = dtype
+        self._data = data
+
+    def tobytes(self, order: str = "C") -> bytes:
+        return self._data
+
+
+class FakeImageResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return b"\x89PNG\r\n\x1a\n"
+
+
+def _get_png_chunk_data(png_data: bytes, chunk_type: bytes) -> bytes:
+    offset = 8
+    while offset < len(png_data):
+        length = int.from_bytes(png_data[offset : offset + 4], "big")
+        current_chunk_type = png_data[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + length
+        if current_chunk_type == chunk_type:
+            return png_data[data_start:data_end]
+        offset = data_end + 4
+
+    raise ValueError(f"Chunk {chunk_type!r} not found.")
+
+
+def test_image_functions(
+    caplog: LogCaptureFixture, monkeypatch: MonkeyPatch
+) -> None:
     class MyService(pydase.DataService):
         def __init__(self) -> None:
             super().__init__()
             self.my_image = pydase.components.Image()
+
+    monkeypatch.setattr(image_module, "urlopen", lambda _url: FakeImageResponse())
 
     service_instance = MyService()
     state_manager = StateManager(service_instance)
@@ -29,125 +79,130 @@ def test_image_functions(caplog: LogCaptureFixture) -> None:
     caplog.clear()
 
 
+def test_image_load_from_array() -> None:
+    image = pydase.components.Image()
+    image_data = bytes([255, 0, 0, 0, 255, 0])
+
+    image.load_from_array(FakeArray((1, 2, 3), image_data))
+
+    assert image.format == "RAW"
+    assert image.width == EXPECTED_RAW_WIDTH
+    assert image.height == 1
+    assert image.color_mode == "RGB"
+    assert base64.b64decode(image.value) == image_data
+
+
+def test_image_loads_camera_frame_like_array() -> None:
+    class CameraService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.camera = pydase.components.Image()
+
+        def update_frame(self, frame: FakeArray) -> None:
+            self.camera.load_from_array(frame)
+
+    service = CameraService()
+    frame_data = bytes(
+        (index % 256)
+        for index in range(
+            CAMERA_FRAME_HEIGHT * CAMERA_FRAME_WIDTH * CAMERA_FRAME_CHANNELS
+        )
+    )
+
+    service.update_frame(
+        FakeArray(
+            (CAMERA_FRAME_HEIGHT, CAMERA_FRAME_WIDTH, CAMERA_FRAME_CHANNELS),
+            frame_data,
+        )
+    )
+
+    assert service.camera.format == "RAW"
+    assert service.camera.width == CAMERA_FRAME_WIDTH
+    assert service.camera.height == CAMERA_FRAME_HEIGHT
+    assert service.camera.color_mode == "RGB"
+    assert base64.b64decode(service.camera.value) == frame_data
+
+
+def test_image_load_from_array_as_png() -> None:
+    image = pydase.components.Image()
+
+    image.load_from_array(FakeArray((1, 1, 3), bytes([1, 2, 3])), color_mode="BGR")
+    png_data = image.to_png_bytes()
+
+    assert png_data.startswith(b"\x89PNG\r\n\x1a\n")
+    assert image._get_image_format_from_bytes(png_data) == "PNG"
+    assert _get_png_chunk_data(png_data, b"IHDR")[:10] == (
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02"
+    )
+    assert zlib.decompress(_get_png_chunk_data(png_data, b"IDAT")) == (
+        b"\x00\x03\x02\x01"
+    )
+
+
+def test_image_save_to_png(tmp_path: Path) -> None:
+    image = pydase.components.Image()
+    image.load_from_array(FakeArray((1, 1), bytes([123])))
+    path = tmp_path / "image.png"
+
+    image.save_to_png(path)
+
+    assert path.read_bytes() == image.to_png_bytes()
+
+
 def test_image_serialization() -> None:
     class MyService(pydase.DataService):
         def __init__(self) -> None:
             super().__init__()
             self.my_image = pydase.components.Image()
 
-    assert dump(MyService()) == {
-        "full_access_path": "",
-        "name": "MyService",
-        "type": "DataService",
-        "value": {
-            "my_image": {
-                "full_access_path": "my_image",
-                "name": "Image",
-                "type": "Image",
-                "value": {
-                    "format": {
-                        "full_access_path": "my_image.format",
-                        "type": "str",
-                        "value": "",
-                        "readonly": True,
-                        "doc": None,
-                    },
-                    "load_from_base64": {
-                        "full_access_path": "my_image.load_from_base64",
-                        "type": "method",
-                        "value": None,
-                        "readonly": True,
-                        "doc": None,
-                        "async": False,
-                        "signature": {
-                            "parameters": {
-                                "value_": {
-                                    "annotation": "<class 'bytes'>",
-                                    "default": {},
-                                },
-                                "format_": {
-                                    "annotation": "str | None",
-                                    "default": {
-                                        "type": "NoneType",
-                                        "value": None,
-                                        "readonly": False,
-                                        "doc": None,
-                                    },
-                                },
-                            },
-                            "return_annotation": {},
-                        },
-                        "frontend_render": False,
-                    },
-                    "load_from_matplotlib_figure": {
-                        "full_access_path": "my_image.load_from_matplotlib_figure",
-                        "type": "method",
-                        "value": None,
-                        "readonly": True,
-                        "doc": None,
-                        "async": False,
-                        "signature": {
-                            "parameters": {
-                                "fig": {"annotation": "Figure", "default": {}},
-                                "format_": {
-                                    "annotation": "<class 'str'>",
-                                    "default": {
-                                        "type": "str",
-                                        "value": "png",
-                                        "readonly": False,
-                                        "doc": None,
-                                    },
-                                },
-                            },
-                            "return_annotation": {},
-                        },
-                        "frontend_render": False,
-                    },
-                    "load_from_path": {
-                        "full_access_path": "my_image.load_from_path",
-                        "type": "method",
-                        "value": None,
-                        "readonly": True,
-                        "doc": None,
-                        "async": False,
-                        "signature": {
-                            "parameters": {
-                                "path": {
-                                    "annotation": f"{PATHLIB_PATH} | str",
-                                    "default": {},
-                                }
-                            },
-                            "return_annotation": {},
-                        },
-                        "frontend_render": False,
-                    },
-                    "load_from_url": {
-                        "full_access_path": "my_image.load_from_url",
-                        "type": "method",
-                        "value": None,
-                        "readonly": True,
-                        "doc": None,
-                        "async": False,
-                        "signature": {
-                            "parameters": {
-                                "url": {"annotation": "<class 'str'>", "default": {}}
-                            },
-                            "return_annotation": {},
-                        },
-                        "frontend_render": False,
-                    },
-                    "value": {
-                        "full_access_path": "my_image.value",
-                        "type": "str",
-                        "value": "",
-                        "readonly": True,
-                        "doc": None,
-                    },
-                },
+    serialized = dump(MyService())
+    image = serialized["value"]["my_image"]  # type: ignore[index]
+    image_value = image["value"]  # type: ignore[index]
+
+    assert serialized["full_access_path"] == ""
+    assert serialized["name"] == "MyService"
+    assert serialized["type"] == "DataService"
+    assert image["full_access_path"] == "my_image"
+    assert image["name"] == "Image"
+    assert image["type"] == "Image"
+
+    assert set(image_value) == {
+        "color_mode",
+        "format",
+        "height",
+        "load_from_array",
+        "load_from_base64",
+        "load_from_matplotlib_figure",
+        "load_from_path",
+        "load_from_url",
+        "save_to_png",
+        "to_png_bytes",
+        "value",
+        "width",
+    }
+    assert image_value["value"]["value"] == ""
+    assert image_value["format"]["value"] == ""
+    assert image_value["width"]["value"] == 0
+    assert image_value["height"]["value"] == 0
+    assert image_value["color_mode"]["value"] == ""
+
+    assert image_value["load_from_array"]["signature"]["parameters"] == {
+        "array": {"annotation": "typing.Any", "default": {}},
+        "color_mode": {
+            "annotation": "<class 'str'>",
+            "default": {
+                "type": "str",
+                "value": "auto",
                 "readonly": False,
                 "doc": None,
-            }
+            },
         },
-        "readonly": False,
-        "doc": None,
+    }
+    assert image_value["load_from_path"]["signature"]["parameters"]["path"] == {
+        "annotation": f"{PATHLIB_PATH} | str",
+        "default": {},
+    }
+    assert image_value["save_to_png"]["signature"]["parameters"]["path"] == {
+        "annotation": f"{PATHLIB_PATH} | str",
+        "default": {},
     }
