@@ -13,14 +13,25 @@ interface DataServiceProps {
   addNotification: (message: string, levelname?: LevelName) => void;
   displayName: string;
   id: string;
+  defaultOpen?: boolean;
 }
 
 export type DataServiceJSON = Record<string, SerializedObject>;
 
 export const DataServiceComponent = React.memo(
-  ({ props, isInstantUpdate, addNotification, displayName, id }: DataServiceProps) => {
+  ({
+    props,
+    isInstantUpdate,
+    addNotification,
+    displayName,
+    id,
+    defaultOpen,
+  }: DataServiceProps) => {
     // Retrieve the initial state from localStorage, default to true if not found
-    const [open, setOpen] = useLocalStorage(`dataServiceComponent-${id}-open`, true);
+    const [open, setOpen] = useLocalStorage(
+      `dataServiceComponent-${id}-open`,
+      defaultOpen ?? true,
+    );
 
     const sortedEntries = useSortedEntries(props);
 

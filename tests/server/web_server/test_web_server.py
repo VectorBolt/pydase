@@ -19,6 +19,7 @@ def test_web_settings() -> None:
         def __init__(self) -> None:
             super().__init__()
             self.attr_1 = SubClass()
+            self.attr_2 = SubClass()
             self.added = "added"
 
     service_instance = ServiceClass()
@@ -26,7 +27,11 @@ def test_web_settings() -> None:
     observer = DataServiceObserver(state_manager)
     with tempfile.TemporaryDirectory() as tmp:
         web_settings = {
-            "attr_1": {"displayName": "Attribute", "display": False},
+            "attr_1": {
+                "displayName": "Attribute",
+                "display": False,
+                "defaultOpen": False,
+            },
             "attr_1.name": {"displayName": "Attribute name", "display": True},
         }
         web_settings_file = Path(tmp) / "web_settings.json"
@@ -46,9 +51,21 @@ def test_web_settings() -> None:
         # existing entries are not overwritten, new entries are appended
         assert new_web_settings == {
             **web_settings,
+            "attr_2": {
+                "displayName": "attr_2",
+                "display": True,
+                "defaultOpen": True,
+            },
+            "attr_2.name": {"displayName": "name", "display": True},
             "added": {"displayName": "added", "display": True},
         }
         assert json.loads(web_settings_file.read_text()) == {
             **web_settings,
+            "attr_2": {
+                "displayName": "attr_2",
+                "display": True,
+                "defaultOpen": True,
+            },
+            "attr_2.name": {"displayName": "name", "display": True},
             "added": {"displayName": "added", "display": True},
         }

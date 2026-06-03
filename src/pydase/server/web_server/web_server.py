@@ -2,8 +2,9 @@ import asyncio
 import html
 import json
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import aiohttp.web
 import aiohttp_middlewares.cors
@@ -19,9 +20,35 @@ from pydase.utils.helpers import (
     get_path_from_path_parts,
     parse_full_access_path,
 )
-from pydase.utils.serialization.serializer import generate_serialized_data_paths
+from pydase.utils.serialization.serializer import serialized_dict_is_nested_object
+from pydase.utils.serialization.types import SerializedObject
 
 logger = logging.getLogger(__name__)
+
+
+def _iter_serialized_objects(
+    serialized_objects: dict[str, SerializedObject],
+) -> Iterator[SerializedObject]:
+    for serialized_object in serialized_objects.values():
+        yield from _iter_serialized_object(serialized_object)
+
+
+def _iter_serialized_object(
+    serialized_object: SerializedObject,
+) -> Iterator[SerializedObject]:
+    yield serialized_object
+
+    if not serialized_dict_is_nested_object(serialized_object):
+        return
+
+    nested_value = serialized_object["value"]
+    if isinstance(nested_value, list):
+        for item in nested_value:
+            yield from _iter_serialized_object(item)
+    elif isinstance(nested_value, dict):
+        yield from _iter_serialized_objects(
+            cast("dict[str, SerializedObject]", nested_value)
+        )
 
 
 class WebServer:
@@ -240,7 +267,10 @@ class WebServer:
     @property
     def web_settings(self) -> dict[str, dict[str, Any]]:
         current_web_settings = self._get_web_settings_from_file()
-        for path in generate_serialized_data_paths(self.state_manager.cache_value):
+        for serialized_object in _iter_serialized_objects(
+            self.state_manager.cache_value
+        ):
+            path = serialized_object["full_access_path"]
             if path in current_web_settings:
                 continue
 
@@ -254,9 +284,13 @@ class WebServer:
                 if not item.startswith("["):
                     break
 
-            current_web_settings[path] = {
+            default_settings = {
                 "displayName": get_path_from_path_parts(display_name_parts),
                 "display": True,
             }
+            if serialized_object["type"] == "DataService":
+                default_settings["defaultOpen"] = True
+
+            current_web_settings[path] = default_settings
 
         return current_web_settings

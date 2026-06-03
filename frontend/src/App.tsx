@@ -53,7 +53,9 @@ const reducer = (state: State | null, action: Action): State | null => {
 const App = () => {
   const [state, dispatch] = useReducer(reducer, null);
   const [serviceName, setServiceName] = useState<string | null>(null);
-  const [webSettings, setWebSettings] = useState<Record<string, WebSetting>>({});
+  const [webSettings, setWebSettings] = useState<Record<string, WebSetting> | null>(
+    null,
+  );
   const [isInstantUpdate, setIsInstantUpdate] = useLocalStorage(
     "isInstantUpdate",
     false,
@@ -83,19 +85,31 @@ const App = () => {
 
     socket.on("connect", () => {
       // Fetch data from the API when the client connects
-      fetch(`${forwardedProto}://${authority}/service-properties`, {
-        credentials: "include",
-      })
+      const servicePropertiesRequest = fetch(
+        `${forwardedProto}://${authority}/service-properties`,
+        {
+          credentials: "include",
+        },
+      ).then((response) => response.json());
+
+      const webSettingsRequest = fetch(
+        `${forwardedProto}://${authority}/web-settings`,
+        {
+          credentials: "include",
+        },
+      )
         .then((response) => response.json())
-        .then((data: State) => {
+        .catch(() => ({}));
+
+      Promise.all([servicePropertiesRequest, webSettingsRequest]).then(
+        ([data, webSettingsData]: [State, Record<string, WebSetting>]) => {
+          setWebSettings(webSettingsData);
           dispatch({ type: "SET_DATA", data });
           setServiceName(data.name);
 
           document.title = data.name; // Setting browser tab title
-        });
-      fetch(`${forwardedProto}://${authority}/web-settings`, { credentials: "include" })
-        .then((response) => response.json())
-        .then((data: Record<string, WebSetting>) => setWebSettings(data));
+        },
+      );
       setConnectionStatus("connected");
     });
     socket.on("disconnect", () => {
@@ -162,7 +176,7 @@ const App = () => {
   }
 
   // While the data is loading
-  if (!state) {
+  if (!state || webSettings === null) {
     return <ConnectionToast connectionStatus={connectionStatus} />;
   }
   return (

@@ -88,6 +88,7 @@ Each key in the file corresponds to the full access path of public attributes, p
 - **Custom Display Names**: Modify the `"displayName"` value in the file to change how each component appears in the frontend.
 - **Control Component Visibility**: Utilize the `"display"` key-value pair to control whether a component is rendered in the frontend. Set the value to `true` to make the component visible or `false` to hide it.
 - **Adjustable Component Order**: The `"displayOrder"` values determine the order of components. Alter these values to rearrange the components as desired. The value defaults to [`Number.MAX_SAFE_INTEGER`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER).
+- **Default DataService Expansion**: Set `"defaultOpen"` to `false` for a `DataService` component to have it collapsed by default. The browser remembers manual open/closed changes, so this default only applies until the user toggles that component.
 
 The `web_settings.json` file will be stored in the directory specified by the `SERVICE_CONFIG_DIR` environment variable. You can generate a `web_settings.json` file by setting the `GENERATE_WEB_SETTINGS` to `True`. For more information, see the [configuration section](../Configuration.md).
 
@@ -118,7 +119,8 @@ with the following `web_settings.json`
 {
     "device": {
         "displayName": "My Device",
-        "displayOrder": 1
+        "displayOrder": 1,
+        "defaultOpen": false
     },
     "device.name": {
         "display": false

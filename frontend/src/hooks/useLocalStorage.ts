@@ -1,11 +1,14 @@
-import { useState, useEffect } from "react";
+import { Dispatch, SetStateAction, useEffect, useState } from "react";
 import { authority } from "../socket";
 
-export default function useLocalStorage(key: string, defaultValue: unknown) {
+export default function useLocalStorage<T>(
+  key: string,
+  defaultValue: T,
+): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState(() => {
     const storedValue = localStorage.getItem(`${authority}:${key}`);
     if (storedValue) {
-      return JSON.parse(storedValue);
+      return JSON.parse(storedValue) as T;
     }
     return defaultValue;
   });

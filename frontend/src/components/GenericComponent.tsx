@@ -102,15 +102,16 @@ export const GenericComponent = React.memo(
     const { full_access_path: fullAccessPath } = attribute;
     const id = getIdFromFullAccessPath(fullAccessPath);
     const webSettings = useContext(WebSettingsContext);
+    const webSetting = webSettings[fullAccessPath];
 
     let displayName = createDisplayNameFromAccessPath(fullAccessPath);
 
-    if (webSettings[fullAccessPath]) {
-      if (webSettings[fullAccessPath].display === false) {
+    if (webSetting) {
+      if (webSetting.display === false) {
         return null;
       }
-      if (webSettings[fullAccessPath].displayName) {
-        displayName = webSettings[fullAccessPath].displayName;
+      if (webSetting.displayName) {
+        displayName = webSetting.displayName;
       }
     }
 
@@ -229,6 +230,7 @@ export const GenericComponent = React.memo(
           addNotification={addNotification}
           displayName={displayName}
           id={id}
+          defaultOpen={webSetting?.defaultOpen}
         />
       );
     } else if (attribute.type === "DeviceConnection") {
