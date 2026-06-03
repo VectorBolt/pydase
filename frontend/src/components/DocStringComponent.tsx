@@ -11,7 +11,11 @@ export const DocStringComponent = React.memo((props: DocStringProps) => {
     return null; // render nothing if docString is not provided
   }
 
-  const tooltip = <Tooltip id="tooltip">{docString}</Tooltip>;
+  const tooltip = (
+    <Tooltip id="tooltip" style={{ whiteSpace: "pre-line" }}>
+      {docString}
+    </Tooltip>
+  );
 
   return (
     <OverlayTrigger placement="bottom" overlay={tooltip}>

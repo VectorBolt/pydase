@@ -80,6 +80,52 @@ def test_dynamic_list_property_dependencies() -> None:
     }
 
 
+def test_help_text_dependency_updates_property_doc() -> None:
+    class PowerSupply(pydase.DataService):
+        mode = "safe"
+        _voltage = 1.0
+
+        def allowed_voltage_range(self) -> tuple[float, float]:
+            return (0.0, 5.0) if self.mode == "safe" else (0.0, 30.0)
+
+        def voltage_help(self) -> str:
+            low, high = self.allowed_voltage_range()
+            return f"Allowed range: {low:g} to {high:g} V"
+
+        @pydase.help_text(voltage_help, depends_on=["mode"])
+        @property
+        def voltage(self) -> float:
+            """Voltage setpoint."""
+            return self._voltage
+
+    service = PowerSupply()
+    state_manager = StateManager(service)
+    observer = DataServiceObserver(state_manager)
+    notifications: list[tuple[str, Any]] = []
+
+    observer.add_notification_callback(
+        lambda full_access_path, value, cached_value_dict: notifications.append(
+            (full_access_path, cached_value_dict)
+        )
+    )
+
+    assert observer.property_deps_dict["mode"] == ["voltage"]
+    assert state_manager.cache_manager.get_value_dict_from_cache("voltage")["doc"] == (
+        "Voltage setpoint.\n\nAllowed range: 0 to 5 V"
+    )
+
+    service.mode = "extended"
+
+    voltage_serialization = state_manager.cache_manager.get_value_dict_from_cache(
+        "voltage"
+    )
+    assert voltage_serialization["value"] == 1.0
+    assert voltage_serialization["doc"] == (
+        "Voltage setpoint.\n\nAllowed range: 0 to 30 V"
+    )
+    assert ("voltage", voltage_serialization) in notifications
+
+
 def test_protected_or_private_change_logs(caplog: pytest.LogCaptureFixture) -> None:
     class OtherService(pydase.DataService):
         def __init__(self) -> None:

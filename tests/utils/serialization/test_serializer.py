@@ -208,6 +208,51 @@ def test_ColouredEnum_serialize() -> None:
     }
 
 
+def test_property_help_text_serialization() -> None:
+    class PowerSupply(pydase.DataService):
+        _voltage = 1.0
+
+        def allowed_voltage_range(self) -> tuple[float, float]:
+            return (0.0, 5.0)
+
+        def voltage_help(self) -> str:
+            low, high = self.allowed_voltage_range()
+            return f"Allowed range: {low:g} to {high:g} V"
+
+        @pydase.help_text(voltage_help)
+        @property
+        def voltage(self) -> float:
+            """Voltage setpoint."""
+            return self._voltage
+
+    serialized = dump(PowerSupply())
+
+    assert serialized["value"]["voltage"]["doc"] == (
+        "Voltage setpoint.\n\nAllowed range: 0 to 5 V"
+    )
+
+
+def test_property_help_text_provider_error_falls_back_to_docstring(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class PowerSupply(pydase.DataService):
+        _voltage = 1.0
+
+        def voltage_help(self) -> str:
+            raise RuntimeError("device unavailable")
+
+        @pydase.help_text(voltage_help)
+        @property
+        def voltage(self) -> float:
+            """Voltage setpoint."""
+            return self._voltage
+
+    serialized = dump(PowerSupply())
+
+    assert serialized["value"]["voltage"]["doc"] == "Voltage setpoint."
+    assert "Failed to evaluate @help_text provider" in caplog.text
+
+
 @pytest.mark.asyncio(loop_scope="module")
 async def test_method_serialization() -> None:
     class ClassWithMethod(pydase.DataService):

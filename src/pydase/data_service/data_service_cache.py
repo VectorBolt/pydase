@@ -1,7 +1,13 @@
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+from pydase.utils.helpers import (
+    get_object_by_path_parts,
+    is_property_attribute,
+    parse_full_access_path,
+)
 from pydase.utils.serialization.serializer import (
+    Serializer,
     get_nested_dict_by_path,
     set_nested_value_by_path,
 )
@@ -49,6 +55,7 @@ class DataServiceCache:
             cast("dict[str, SerializedObject]", self._cache["value"]),
             full_access_path,
             value,
+            serialized_value=self.serialize_value_for_cache(full_access_path, value),
         )
 
     def get_value_dict_from_cache(self, full_access_path: str) -> SerializedObject:
@@ -56,3 +63,25 @@ class DataServiceCache:
             cast("dict[str, SerializedObject]", self._cache["value"]),
             full_access_path,
         )
+
+    def serialize_value_for_cache(
+        self, full_access_path: str, value: Any
+    ) -> SerializedObject:
+        path_parts = parse_full_access_path(full_access_path)
+        parent_obj = get_object_by_path_parts(self.service, path_parts[:-1])
+        attr_name = path_parts[-1]
+
+        if not isinstance(parent_obj, list | dict) and is_property_attribute(
+            parent_obj, attr_name
+        ):
+            return Serializer.serialize_property(
+                obj=parent_obj,
+                key=attr_name,
+                access_path=full_access_path,
+                serialized_value=Serializer.serialize_object(
+                    value,
+                    access_path=full_access_path,
+                ),
+            )
+
+        return Serializer.serialize_object(value, access_path=full_access_path)

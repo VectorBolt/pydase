@@ -5,6 +5,7 @@ from typing import Any
 
 from pydase.observer_pattern.observable.observable import Observable
 from pydase.observer_pattern.observer.observer import Observer
+from pydase.utils.decorators import get_help_text_dependencies
 from pydase.utils.helpers import is_descriptor
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,12 @@ def get_property_dependencies(prop: property, prefix: str = "") -> list[str]:
     source_code_string = inspect.getsource(prop.fget)  # type: ignore[arg-type]
     pattern = r"self\.([^\s\{\}\(\)]+)"
     matches = re.findall(pattern, source_code_string)
-    return [prefix + match for match in matches if "(" not in match]
+    dependencies = [prefix + match for match in matches if "(" not in match]
+    dependencies.extend(
+        prefix + dependency.removeprefix("self.")
+        for dependency in get_help_text_dependencies(prop)
+    )
+    return list(dict.fromkeys(dependencies))
 
 
 class PropertyObserver(Observer):

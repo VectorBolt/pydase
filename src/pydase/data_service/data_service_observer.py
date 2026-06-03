@@ -8,6 +8,7 @@ from pydase.observer_pattern.observable.observable_object import ObservableObjec
 from pydase.observer_pattern.observer.property_observer import (
     PropertyObserver,
 )
+from pydase.task.task_status import TaskStatus
 from pydase.utils.helpers import (
     get_object_attr_from_path,
 )
@@ -61,23 +62,24 @@ class DataServiceObserver(PropertyObserver):
                 "readonly": False,
             }
 
-        cached_value = cached_value_dict.get("value")
-        if (
-            all(part[0] != "_" for part in full_access_path.split("."))
-            and cached_value != dump(value)["value"]
-        ):
-            logger.debug("'%s' changed to '%s'", full_access_path, value)
-
-            self._update_cache_value(full_access_path, value, cached_value_dict)
-
-            cached_value_dict = deepcopy(
-                self.state_manager.cache_manager.get_value_dict_from_cache(
-                    full_access_path
-                )
+        if all(part[0] != "_" for part in full_access_path.split(".")):
+            value_dict = self.state_manager.cache_manager.serialize_value_for_cache(
+                full_access_path,
+                value,
             )
+            if self._serialized_object_changed(cached_value_dict, value_dict, value):
+                logger.debug("'%s' changed to '%s'", full_access_path, value)
 
-            for callback in self._notification_callbacks:
-                callback(full_access_path, value, cached_value_dict)
+                self._update_cache_value(full_access_path, value, cached_value_dict)
+
+                cached_value_dict = deepcopy(
+                    self.state_manager.cache_manager.get_value_dict_from_cache(
+                        full_access_path
+                    )
+                )
+
+                for callback in self._notification_callbacks:
+                    callback(full_access_path, value, cached_value_dict)
 
         if isinstance(value, ObservableObject):
             self._update_property_deps_dict()
@@ -108,6 +110,18 @@ class DataServiceObserver(PropertyObserver):
             full_access_path,
             value,
         )
+
+    def _serialized_object_changed(
+        self,
+        cached_value_dict: SerializedObject | dict[str, Any],
+        value_dict: SerializedObject,
+        value: Any,
+    ) -> bool:
+        if cached_value_dict.get("type") == "method":
+            value = "RUNNING" if isinstance(value, TaskStatus) else None
+            return cached_value_dict.get("value") != value
+
+        return cached_value_dict != value_dict
 
     def _notify_dependent_property_changes(self, changed_attr_path: str) -> None:
         changed_props = self.property_deps_dict.get(changed_attr_path, [])

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import pydase.units as u
 from pydase.data_service.abstract_data_service import AbstractDataService
 from pydase.task.task_status import TaskStatus
-from pydase.utils.decorators import render_in_frontend
+from pydase.utils.decorators import get_property_doc, render_in_frontend
 from pydase.utils.helpers import (
     get_attribute_doc,
     get_component_classes,
@@ -315,9 +315,12 @@ class Serializer:
 
             # If the DataService attribute is a property
             if is_property_attribute(obj, key):
-                prop: property = getattr(obj.__class__, key)
-                value[key]["readonly"] = prop.fset is None
-                value[key]["doc"] = get_attribute_doc(prop)  # overwrite the doc
+                value[key] = cls.serialize_property(
+                    obj=obj,
+                    key=key,
+                    access_path=path,
+                    serialized_value=serialized_object,
+                )
 
         return {
             "full_access_path": access_path,
@@ -327,6 +330,25 @@ class Serializer:
             "readonly": readonly,
             "doc": doc,
         }
+
+    @classmethod
+    def serialize_property(
+        cls,
+        obj: object,
+        key: str,
+        access_path: str,
+        serialized_value: SerializedObject | None = None,
+    ) -> SerializedObject:
+        if serialized_value is None:
+            serialized_value = cls.serialize_object(
+                getattr(obj, key),
+                access_path=access_path,
+            )
+
+        prop: property = getattr(obj.__class__, key)
+        serialized_value["readonly"] = prop.fset is None
+        serialized_value["doc"] = get_property_doc(prop, obj)
+        return serialized_value
 
     @classmethod
     def _serialize_proxy_class(
@@ -354,7 +376,10 @@ def dump(obj: Any) -> SerializedObject:
 
 
 def set_nested_value_by_path(
-    serialization_dict: dict[Any, SerializedObject], path: str, value: Any
+    serialization_dict: dict[Any, SerializedObject],
+    path: str,
+    value: Any,
+    serialized_value: SerializedObject | None = None,
 ) -> None:
     """
     Set a value in a nested dictionary structure, which conforms to the serialization
@@ -401,8 +426,9 @@ def set_nested_value_by_path(
             "RUNNING" if isinstance(value, TaskStatus) else None
         )
     else:
-        serialized_value = Serializer.serialize_object(value, access_path=path)
-        serialized_value["readonly"] = next_level_serialized_object["readonly"]
+        if serialized_value is None:
+            serialized_value = Serializer.serialize_object(value, access_path=path)
+            serialized_value["readonly"] = next_level_serialized_object["readonly"]
 
         keys_to_keep = set(serialized_value.keys())
 
