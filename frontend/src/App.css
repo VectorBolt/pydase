@@ -96,6 +96,15 @@ input.instantUpdate {
 .pydase-table-scroll .booleanCell {
   text-align: center;
 }
+.pydase-table-scroll .selectableRow {
+  cursor: pointer;
+}
+.pydase-table-scroll .selectedRow > td {
+  background-color: rgba(var(--bs-primary-rgb), 0.14) !important;
+}
+.pydase-table-scroll .selectedRow:hover > td {
+  background-color: rgba(var(--bs-primary-rgb), 0.2) !important;
+}
 .deviceConnectionComponent {
   position: relative;
   float: left !important;

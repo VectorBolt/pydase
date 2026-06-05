@@ -1,10 +1,11 @@
-from collections.abc import Mapping, Sequence
-from typing import Any, TypeAlias
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal, TypeAlias
 
 from pydase.data_service.data_service import DataService
 
 TableCell: TypeAlias = str | int | float | bool | None
 TableRow: TypeAlias = Mapping[str, Any] | Sequence[Any]
+SelectionMode: TypeAlias = Literal["none", "single", "multiple"]
 
 
 class Table(DataService):
@@ -19,8 +20,14 @@ class Table(DataService):
         width: str = "max-content",
         cell_padding: str = "0.75rem 1.75rem 0.75rem 0.75rem",
         max_cell_width: str = "32rem",
+        selection_mode: SelectionMode = "none",
+        selected_indices: Sequence[int] | None = None,
+        on_selection_change: Callable[[list[int]], None] | None = None,
     ) -> None:
         super().__init__()
+        if selection_mode not in ("none", "single", "multiple"):
+            raise ValueError("selection_mode must be 'none', 'single', or 'multiple'.")
+
         normalized_columns, normalized_rows = self._normalize_table(rows or [], columns)
         self._columns = normalized_columns
         self._rows = normalized_rows
@@ -28,6 +35,11 @@ class Table(DataService):
         self._width = width
         self._cell_padding = cell_padding
         self._max_cell_width = max_cell_width
+        self._selection_mode = selection_mode
+        self._selected_indices = self._normalize_selected_indices(
+            list(selected_indices or [])
+        )
+        self._on_selection_change = on_selection_change
 
     @property
     def columns(self) -> list[str]:
@@ -59,6 +71,25 @@ class Table(DataService):
         """Maximum CSS width of an individual table cell."""
         return self._max_cell_width
 
+    @property
+    def selection_mode(self) -> SelectionMode:
+        """Row selection mode used by the frontend."""
+        return self._selection_mode
+
+    @property
+    def selected_indices(self) -> list[int]:
+        """Indices of rows selected in the frontend."""
+        return self._selected_indices
+
+    @selected_indices.setter
+    def selected_indices(self, value: Sequence[int]) -> None:
+        self._set_selected_indices(value)
+
+    @property
+    def selected_rows(self) -> list[dict[str, TableCell]]:
+        """Rows currently selected in the frontend."""
+        return [self._rows[index] for index in self._selected_indices]
+
     def set_rows(
         self,
         rows: Sequence[TableRow],
@@ -67,6 +98,7 @@ class Table(DataService):
         normalized_columns, normalized_rows = self._normalize_table(rows, columns)
         self._columns = normalized_columns
         self._rows = normalized_rows
+        self._set_selected_indices(self._selected_indices)
 
     def append_row(self, row: TableRow) -> None:
         self._extend_columns_for_row(row)
@@ -75,6 +107,7 @@ class Table(DataService):
 
     def clear(self) -> None:
         self._rows.clear()
+        self._set_selected_indices([])
 
     def _normalize_table(
         self,
@@ -142,3 +175,23 @@ class Table(DataService):
                 self._columns.append(column)
                 for existing_row in self._rows:
                     existing_row[column] = None
+
+    def _set_selected_indices(self, value: Sequence[int]) -> None:
+        self._selected_indices = self._normalize_selected_indices(value)
+        if self._on_selection_change is not None:
+            self._on_selection_change(self._selected_indices.copy())
+
+    def _normalize_selected_indices(self, value: Sequence[int]) -> list[int]:
+        if self._selection_mode == "none":
+            return []
+
+        selected_indices: list[int] = []
+        for index in value:
+            if not isinstance(index, int) or index < 0 or index >= len(self._rows):
+                continue
+            if index not in selected_indices:
+                selected_indices.append(index)
+
+        if self._selection_mode == "single":
+            return selected_indices[:1]
+        return selected_indices

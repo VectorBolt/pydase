@@ -302,12 +302,17 @@ export const GenericComponent = React.memo(
           displayName={displayName}
           id={id}
           addNotification={addNotification}
+          changeCallback={changeCallback}
           columns={attribute.value["columns"] as SerializedObject}
           rows={attribute.value["rows"] as SerializedObject}
+          selectedIndices={attribute.value["selected_indices"] as SerializedObject}
           maxHeight={Number(attribute.value["max_height"]["value"])}
           width={attribute.value["width"]["value"] as string}
           cellPadding={attribute.value["cell_padding"]["value"] as string}
           maxCellWidth={attribute.value["max_cell_width"]["value"] as string}
+          selectionMode={
+            attribute.value["selection_mode"]["value"] as "none" | "single" | "multiple"
+          }
         />
       );
     } else {

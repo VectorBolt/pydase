@@ -48,9 +48,23 @@ class OutputComponentsDemo(pydase.DataService):
             max_height=220,
             width="50%",
             cell_padding="0.75rem 5rem 0.75rem 0.75rem",
-            max_cell_width="75rem"
+            max_cell_width="75rem",
+            selection_mode="multiple",
+            on_selection_change=self.handle_table_selection,
         )
         self._next_run = 1
+
+    def handle_table_selection(self, selected_indices: list[int]) -> None:
+        if not selected_indices:
+            self.long_text.set_text("No table rows selected.")
+            return
+
+        selected_samples = [
+            self.results.rows[index]["sample"] for index in selected_indices
+        ]
+        self.long_text.set_text(
+            "Selected rows:\n" + "\n".join(str(sample) for sample in selected_samples)
+        )
 
     @frontend
     def add_output(self) -> None:

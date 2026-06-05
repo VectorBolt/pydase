@@ -45,6 +45,48 @@ def test_table_updates_observed_state() -> None:
     assert cached_rows[0]["value"]["value"]["value"] == 1.0
 
 
+def test_table_selection_updates_callback_and_selected_rows() -> None:
+    callback_values: list[list[int]] = []
+    table = Table(
+        rows=[
+            {"name": "alpha"},
+            {"name": "beta"},
+            {"name": "gamma"},
+        ],
+        selection_mode="multiple",
+        on_selection_change=callback_values.append,
+    )
+
+    table.selected_indices = [0, 2, 2, -1, 8]
+
+    assert table.selected_indices == [0, 2]
+    assert table.selected_rows == [{"name": "alpha"}, {"name": "gamma"}]
+    assert callback_values == [[0, 2]]
+
+    table.set_rows([{"name": "alpha"}])
+
+    assert table.selected_indices == [0]
+    assert callback_values[-1] == [0]
+
+    table.clear()
+
+    assert table.selected_indices == []
+    assert callback_values[-1] == []
+
+
+def test_table_single_selection_mode() -> None:
+    table = Table(
+        rows=[
+            {"name": "alpha"},
+            {"name": "beta"},
+        ],
+        selection_mode="single",
+        selected_indices=[0, 1],
+    )
+
+    assert table.selected_indices == [0]
+
+
 def test_table_serialization() -> None:
     score = 0.95
     max_height = 300
@@ -64,6 +106,8 @@ def test_table_serialization() -> None:
                 width=width,
                 cell_padding=cell_padding,
                 max_cell_width=max_cell_width,
+                selection_mode="multiple",
+                selected_indices=[0],
             )
 
     table = dump(MyService())["value"]["table"]
@@ -78,3 +122,5 @@ def test_table_serialization() -> None:
     assert table["value"]["width"]["value"] == width
     assert table["value"]["cell_padding"]["value"] == cell_padding
     assert table["value"]["max_cell_width"]["value"] == max_cell_width
+    assert table["value"]["selection_mode"]["value"] == "multiple"
+    assert table["value"]["selected_indices"]["value"][0]["value"] == 0

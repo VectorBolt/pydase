@@ -7,17 +7,21 @@ import { SerializedObject } from "../types/SerializedObject";
 import useRenderCount from "../hooks/useRenderCount";
 
 type TableCell = string | number | boolean | null;
+type SelectionMode = "none" | "single" | "multiple";
 
 interface TableComponentProps {
   fullAccessPath: string;
   columns: SerializedObject;
   rows: SerializedObject;
+  selectedIndices: SerializedObject;
   docString: string | null;
   maxHeight: number;
   width: string;
   cellPadding: string;
   maxCellWidth: string;
+  selectionMode: SelectionMode;
   addNotification: (message: string, levelname?: LevelName) => void;
+  changeCallback?: (value: SerializedObject, callback?: (ack: unknown) => void) => void;
   displayName: string;
   id: string;
 }
@@ -106,6 +110,16 @@ const getRows = (rowsObject: SerializedObject, columns: string[]): TableCell[][]
   });
 };
 
+const getSelectedIndices = (selectedIndicesObject: SerializedObject): number[] => {
+  if (selectedIndicesObject.type !== "list") {
+    return [];
+  }
+
+  return selectedIndicesObject.value
+    .filter((item) => item.type === "int")
+    .map((item) => item.value as number);
+};
+
 const getColumnClassNames = (rows: TableCell[][], columns: string[]): string[] => {
   return columns.map((_, columnIndex) => {
     const values = rows
@@ -130,18 +144,24 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
     fullAccessPath,
     columns: serializedColumns,
     rows: serializedRows,
+    selectedIndices: serializedSelectedIndices,
     docString,
     maxHeight,
     width,
     cellPadding,
     maxCellWidth,
+    selectionMode,
     addNotification,
+    changeCallback = () => {},
     displayName,
     id,
   } = props;
 
   const renderCount = useRenderCount();
   const [open, setOpen] = useState(true);
+  const [selectedRowIndices, setSelectedRowIndices] = useState(
+    getSelectedIndices(serializedSelectedIndices),
+  );
   const columns = useMemo(() => getColumns(serializedColumns), [serializedColumns]);
   const rows = useMemo(
     () => getRows(serializedRows, columns),
@@ -156,6 +176,55 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
     addNotification(`${fullAccessPath} changed.`);
   }, [props.columns, props.rows]);
 
+  useEffect(() => {
+    setSelectedRowIndices(getSelectedIndices(serializedSelectedIndices));
+  }, [serializedSelectedIndices]);
+
+  const isSelectionEnabled = selectionMode !== "none";
+
+  const updateSelectedIndices = (indices: number[]) => {
+    setSelectedRowIndices(indices);
+    changeCallback({
+      type: "list",
+      value: indices.map((index, listIndex) => ({
+        type: "int",
+        value: index,
+        full_access_path: `${serializedSelectedIndices.full_access_path}[${listIndex}]`,
+        readonly: false,
+        doc: null,
+      })),
+      full_access_path: serializedSelectedIndices.full_access_path,
+      readonly: false,
+      doc: serializedSelectedIndices.doc,
+    });
+  };
+
+  const toggleRowSelection = (rowIndex: number) => {
+    if (!isSelectionEnabled) {
+      return;
+    }
+
+    if (selectionMode === "single") {
+      updateSelectedIndices(selectedRowIndices.includes(rowIndex) ? [] : [rowIndex]);
+      return;
+    }
+
+    const nextSelectedIndices = selectedRowIndices.includes(rowIndex)
+      ? selectedRowIndices.filter((index) => index !== rowIndex)
+      : [...selectedRowIndices, rowIndex].sort((a, b) => a - b);
+    updateSelectedIndices(nextSelectedIndices);
+  };
+
+  const handleRowKeyDown = (
+    event: React.KeyboardEvent<HTMLTableRowElement>,
+    rowIndex: number,
+  ) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      toggleRowSelection(rowIndex);
+    }
+  };
+
   return (
     <div className="component tableComponent" id={id}>
       <Card>
@@ -166,6 +235,11 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
             <Badge bg="secondary" pill className="ms-2">
               {rows.length} rows
             </Badge>
+            {isSelectionEnabled && selectedRowIndices.length > 0 && (
+              <Badge bg="primary" pill className="ms-2">
+                {selectedRowIndices.length} selected
+              </Badge>
+            )}
           </span>
           {open ? <ChevronDown /> : <ChevronRight />}
         </Card.Header>
@@ -203,7 +277,18 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
                   </thead>
                   <tbody>
                     {rows.map((row, rowIndex) => (
-                      <tr key={`${fullAccessPath}-${rowIndex}`}>
+                      <tr
+                        key={`${fullAccessPath}-${rowIndex}`}
+                        aria-selected={selectedRowIndices.includes(rowIndex)}
+                        className={[
+                          isSelectionEnabled ? "selectableRow" : "",
+                          selectedRowIndices.includes(rowIndex) ? "selectedRow" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                        onClick={() => toggleRowSelection(rowIndex)}
+                        onKeyDown={(event) => handleRowKeyDown(event, rowIndex)}
+                        tabIndex={isSelectionEnabled ? 0 : undefined}>
                         {columns.map((column, columnIndex) => {
                           const value = row[columnIndex] ?? null;
                           return (

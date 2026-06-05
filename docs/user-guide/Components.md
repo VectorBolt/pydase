@@ -278,7 +278,8 @@ class MyDataService(pydase.DataService):
 ### `Table`
 
 The `Table` component displays read-only tabular output in the frontend. Rows can be
-provided as dictionaries or as sequences with explicit column names.
+provided as dictionaries or as sequences with explicit column names. If row selection is
+enabled, the browser writes selected row indices back to `selected_indices`.
 
 ```python
 import pydase
@@ -297,13 +298,23 @@ class MyDataService(pydase.DataService):
             width="max-content",
             cell_padding="0.75rem 1.75rem 0.75rem 0.75rem",
             max_cell_width="24rem",
+            selection_mode="multiple",
+            on_selection_change=self.handle_selected_rows,
         )
 
     def add_result(self, channel: str, voltage: float) -> None:
         self.results.append_row(
             {"channel": channel, "voltage": voltage, "enabled": True}
         )
+
+    def handle_selected_rows(self, selected_indices: list[int]) -> None:
+        selected_rows = [self.results.rows[index] for index in selected_indices]
+        print(selected_rows)
 ```
+
+Use `selection_mode="single"` to allow one selected row, `selection_mode="multiple"`
+to allow multiple selected rows, or leave the default `selection_mode="none"` for a
+non-interactive output table.
 
 ### `NumberSlider`
 
