@@ -8,7 +8,7 @@ import { StringComponent } from "./StringComponent";
 import { ListComponent } from "./ListComponent";
 import { DataServiceComponent, DataServiceJSON } from "./DataServiceComponent";
 import { DeviceConnectionComponent } from "./DeviceConnection";
-import { ImageComponent, ImageOverlay } from "./ImageComponent";
+import { ImageComponent, ImageOverlay, ImageSelection } from "./ImageComponent";
 import { TableComponent } from "./TableComponent";
 import { TextAreaComponent } from "./TextAreaComponent";
 import { LevelName } from "./NotificationsComponent";
@@ -95,6 +95,41 @@ const deserializeImageOverlays = (attribute: SerializedObject): ImageOverlay[] =
   return attribute.value
     .map(deserializeImageOverlay)
     .filter((overlay): overlay is ImageOverlay => overlay !== null);
+};
+
+const deserializeImageSelection = (
+  attribute: SerializedObject | undefined,
+): ImageSelection | null => {
+  if (!attribute || attribute.type !== "dict") {
+    return null;
+  }
+
+  const selection = Object.fromEntries(
+    (["x", "y", "width", "height"] as const).map((key) => [
+      key,
+      attribute.value[key]?.type === "int" ? attribute.value[key].value : null,
+    ]),
+  ) as Record<keyof ImageSelection, number | null>;
+
+  if (
+    selection.x === null ||
+    selection.y === null ||
+    selection.width === null ||
+    selection.height === null
+  ) {
+    return null;
+  }
+
+  if (selection.width <= 0 || selection.height <= 0) {
+    return null;
+  }
+
+  return {
+    x: selection.x,
+    y: selection.y,
+    width: selection.width,
+    height: selection.height,
+  };
 };
 
 export const GenericComponent = React.memo(
@@ -278,6 +313,11 @@ export const GenericComponent = React.memo(
           height={Number(attribute.value["height"]["value"])}
           colorMode={attribute.value["color_mode"]["value"] as string}
           overlays={deserializeImageOverlays(attribute.value["overlays"])}
+          selection={deserializeImageSelection(attribute.value["selection"])}
+          selectionEnabled={Boolean(attribute.value["selection_enabled"]?.["value"])}
+          selectionAccessPath={attribute.value["selection"]["full_access_path"]}
+          selectionDocString={attribute.value["selection"].doc}
+          changeCallback={changeCallback}
         />
       );
     } else if (attribute.type === "TextArea") {

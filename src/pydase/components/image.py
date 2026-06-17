@@ -3,7 +3,7 @@ import io
 import logging
 import struct
 import zlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, TypeAlias
 from urllib.request import urlopen
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 OverlayValue: TypeAlias = str | int | float | bool | None
 ImageOverlay: TypeAlias = dict[str, OverlayValue]
+ImageSelection: TypeAlias = dict[str, int]
 
 logger = logging.getLogger(__name__)
 
@@ -80,14 +81,24 @@ class Image(DataService):
     }
     _BOOLEAN_OVERLAY_KEYS: ClassVar[set[str]] = {"show_labels"}
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        selection_enabled: bool = False,
+        on_selection_change: Callable[[ImageSelection], None] | None = None,
+    ) -> None:
         super().__init__()
+        if not isinstance(selection_enabled, bool):
+            raise TypeError("selection_enabled must be a bool.")
         self._value: str = ""
         self._format: str = ""
         self._width: int = 0
         self._height: int = 0
         self._color_mode: str = ""
         self._overlays: list[ImageOverlay] = []
+        self._selection_enabled = selection_enabled
+        self._selection: ImageSelection = self._empty_selection()
+        self._on_selection_change = on_selection_change
 
     @property
     def value(self) -> str:
@@ -113,6 +124,36 @@ class Image(DataService):
     def overlays(self) -> list[ImageOverlay]:
         overlays = self._overlays
         return [dict(overlay) for overlay in overlays]
+
+    @property
+    def selection_enabled(self) -> bool:
+        """Whether users can draw an image-region selection in the frontend."""
+        return self._selection_enabled
+
+    @selection_enabled.setter
+    def selection_enabled(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("selection_enabled must be a bool.")
+        object.__setattr__(self, "_selection_enabled", value)
+
+    @property
+    def selection(self) -> ImageSelection:
+        """Region selected in the frontend as x/y/width/height image pixels.
+
+        A zero width or height indicates that no frontend selection is active.
+        """
+
+        return dict(self._selection)
+
+    @selection.setter
+    def selection(self, value: Mapping[str, Any] | None) -> None:
+        normalised_selection = self._normalise_selection(value)
+        if self._selection == normalised_selection:
+            return
+
+        object.__setattr__(self, "_selection", normalised_selection)
+        if self._on_selection_change is not None:
+            self._on_selection_change(dict(normalised_selection))
 
     def load_from_path(self, path: Path | str) -> None:
         with open(path, "rb") as image_file:
@@ -228,6 +269,11 @@ class Image(DataService):
 
         self._set_overlays_if_changed([])
 
+    def clear_selection(self) -> None:
+        """Clear the frontend image-region selection."""
+
+        self.selection = None
+
     def _load_from_base64(
         self,
         value_: bytes,
@@ -335,6 +381,53 @@ class Image(DataService):
         if isinstance(value, str):
             return value
         raise TypeError(f"Overlay key {key!r} must be a string.")
+
+    def _normalise_selection(
+        self,
+        selection: Mapping[str, Any] | None,
+    ) -> ImageSelection:
+        if selection is None:
+            return self._empty_selection()
+
+        if not isinstance(selection, Mapping):
+            raise TypeError("selection must be a dictionary-like object or None.")
+
+        required_keys = {"x", "y", "width", "height"}
+        missing_keys = required_keys - selection.keys()
+        if missing_keys:
+            missing_keys_str = ", ".join(sorted(missing_keys))
+            raise ValueError(
+                f"selection is missing required key(s): {missing_keys_str}."
+            )
+
+        normalised_selection = {
+            key: self._normalise_selection_value(key, selection[key])
+            for key in ("x", "y", "width", "height")
+        }
+
+        if normalised_selection["width"] == 0 or normalised_selection["height"] == 0:
+            if any(value != 0 for value in normalised_selection.values()):
+                raise ValueError(
+                    "selection must either be empty or have positive width and height."
+                )
+            return normalised_selection
+
+        if normalised_selection["width"] < 0 or normalised_selection["height"] < 0:
+            raise ValueError("selection width and height must be non-negative.")
+
+        return normalised_selection
+
+    @staticmethod
+    def _empty_selection() -> ImageSelection:
+        return {"x": 0, "y": 0, "width": 0, "height": 0}
+
+    @staticmethod
+    def _normalise_selection_value(key: str, value: Any) -> int:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"selection key {key!r} must be an integer.")
+        if value < 0:
+            raise ValueError(f"selection key {key!r} must be non-negative.")
+        return value
 
     def _get_raw_image_metadata(
         self,

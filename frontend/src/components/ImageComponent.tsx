@@ -1,15 +1,23 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Card, Collapse, Image as BootstrapImage } from "react-bootstrap";
+import { Button, Card, Collapse, Image as BootstrapImage } from "react-bootstrap";
 import { DocStringComponent } from "./DocStringComponent";
-import { ChevronDown, ChevronRight } from "react-bootstrap-icons";
+import { ChevronDown, ChevronRight, XCircle } from "react-bootstrap-icons";
 import { LevelName } from "./NotificationsComponent";
 import useRenderCount from "../hooks/useRenderCount";
+import { SerializedObject } from "../types/SerializedObject";
 
 type OverlayValue = string | number | boolean | null;
 
 export interface ImageOverlay {
   type: string;
   [key: string]: OverlayValue;
+}
+
+export interface ImageSelection {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface ImageComponentProps {
@@ -21,7 +29,12 @@ interface ImageComponentProps {
   height: number;
   colorMode: string;
   overlays: ImageOverlay[];
+  selection: ImageSelection | null;
+  selectionEnabled: boolean;
+  selectionAccessPath: string;
+  selectionDocString: string | null;
   addNotification: (message: string, levelname?: LevelName) => void;
+  changeCallback?: (value: SerializedObject, callback?: (ack: unknown) => void) => void;
   displayName: string;
   id: string;
 }
@@ -271,6 +284,96 @@ const drawOverlays = (
   }
 };
 
+const drawSelection = (
+  context: CanvasRenderingContext2D,
+  selection: ImageSelection | null,
+): void => {
+  if (!selection) {
+    return;
+  }
+
+  context.save();
+  context.fillStyle = "rgba(13, 110, 253, 0.16)";
+  context.strokeStyle = "#0d6efd";
+  context.lineWidth = 2;
+  context.setLineDash([6, 4]);
+  context.fillRect(selection.x, selection.y, selection.width, selection.height);
+  context.strokeRect(selection.x, selection.y, selection.width, selection.height);
+  context.restore();
+};
+
+const clamp = (value: number, min: number, max: number): number => {
+  return Math.min(Math.max(value, min), max);
+};
+
+const getPointerImagePosition = (
+  event: React.PointerEvent<HTMLCanvasElement>,
+): { x: number; y: number } | null => {
+  const canvas = event.currentTarget;
+  if (canvas.width <= 0 || canvas.height <= 0) {
+    return null;
+  }
+
+  const bounds = canvas.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    return null;
+  }
+
+  return {
+    x: clamp(
+      Math.round((event.clientX - bounds.left) * (canvas.width / bounds.width)),
+      0,
+      canvas.width,
+    ),
+    y: clamp(
+      Math.round((event.clientY - bounds.top) * (canvas.height / bounds.height)),
+      0,
+      canvas.height,
+    ),
+  };
+};
+
+const selectionFromPoints = (
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+): ImageSelection => {
+  const x = Math.min(start.x, end.x);
+  const y = Math.min(start.y, end.y);
+  return {
+    x,
+    y,
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+};
+
+const serializeSelection = (
+  selection: ImageSelection | null,
+  fullAccessPath: string,
+  docString: string | null,
+): SerializedObject => {
+  const serializedSelection = selection ?? { x: 0, y: 0, width: 0, height: 0 };
+
+  const value: Record<string, SerializedObject> = {};
+  for (const key of ["x", "y", "width", "height"] as const) {
+    value[key] = {
+      type: "int",
+      value: serializedSelection[key],
+      full_access_path: `${fullAccessPath}["${key}"]`,
+      readonly: false,
+      doc: null,
+    };
+  }
+
+  return {
+    type: "dict",
+    value,
+    full_access_path: fullAccessPath,
+    readonly: false,
+    doc: docString,
+  };
+};
+
 export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const {
     fullAccessPath,
@@ -281,7 +384,12 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     height,
     colorMode,
     overlays,
+    selection,
+    selectionEnabled,
+    selectionAccessPath,
+    selectionDocString,
     addNotification,
+    changeCallback = () => {},
     displayName,
     id,
   } = props;
@@ -289,8 +397,16 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const renderCount = useRenderCount();
   const [open, setOpen] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
+  const [draftSelection, setDraftSelection] = useState<ImageSelection | null>(null);
   const isRawImage = format.toUpperCase() === "RAW";
-  const shouldRenderCanvas = isRawImage || overlays.length > 0;
+  const displayedSelection = draftSelection ?? selection;
+  const shouldRenderCanvas =
+    isRawImage ||
+    overlays.length > 0 ||
+    selectionEnabled ||
+    displayedSelection !== null;
 
   useEffect(() => {
     addNotification(`${fullAccessPath} changed.`);
@@ -324,6 +440,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
           const rgba = convertRawImageToRgba(bytes, width, height, colorMode);
           context.putImageData(new ImageData(rgba, width, height), 0, 0);
           drawOverlays(context, overlays, width, height);
+          drawSelection(context, displayedSelection);
         } else {
           const image = new window.Image();
           image.onload = () => {
@@ -334,6 +451,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
             canvas.height = image.naturalHeight;
             context.drawImage(image, 0, 0);
             drawOverlays(context, overlays, image.naturalWidth, image.naturalHeight);
+            drawSelection(context, displayedSelection);
           };
           image.src = `data:image/${format.toLowerCase()};base64,${value}`;
         }
@@ -348,6 +466,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     };
   }, [
     colorMode,
+    displayedSelection,
     format,
     height,
     isRawImage,
@@ -357,16 +476,115 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     width,
   ]);
 
+  useEffect(() => {
+    setDraftSelection(null);
+  }, [selection]);
+
+  const updateBackendSelection = (nextSelection: ImageSelection | null) => {
+    changeCallback(
+      serializeSelection(nextSelection, selectionAccessPath, selectionDocString),
+    );
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!selectionEnabled || event.button !== 0) {
+      return;
+    }
+
+    const startPosition = getPointerImagePosition(event);
+    if (!startPosition) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStartRef.current = startPosition;
+    pointerIdRef.current = event.pointerId;
+    setDraftSelection({ ...startPosition, width: 0, height: 0 });
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      !selectionEnabled ||
+      pointerIdRef.current !== event.pointerId ||
+      dragStartRef.current === null
+    ) {
+      return;
+    }
+
+    const currentPosition = getPointerImagePosition(event);
+    if (!currentPosition) {
+      return;
+    }
+
+    event.preventDefault();
+    setDraftSelection(selectionFromPoints(dragStartRef.current, currentPosition));
+  };
+
+  const finishSelection = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (pointerIdRef.current !== event.pointerId || dragStartRef.current === null) {
+      return;
+    }
+
+    const currentPosition = getPointerImagePosition(event);
+    const nextSelection = currentPosition
+      ? selectionFromPoints(dragStartRef.current, currentPosition)
+      : draftSelection;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    dragStartRef.current = null;
+    pointerIdRef.current = null;
+
+    if (nextSelection && nextSelection.width > 0 && nextSelection.height > 0) {
+      setDraftSelection(nextSelection);
+      updateBackendSelection(nextSelection);
+    } else {
+      setDraftSelection(null);
+    }
+  };
+
+  const cancelSelection = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (pointerIdRef.current === event.pointerId) {
+      dragStartRef.current = null;
+      pointerIdRef.current = null;
+      setDraftSelection(null);
+    }
+  };
+
+  const clearSelection = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    setDraftSelection(null);
+    updateBackendSelection(null);
+  };
+
   return (
     <div className="component imageComponent" id={id}>
       <Card>
         <Card.Header
+          className="pydase-component-header"
           onClick={() => setOpen(!open)}
           style={{ cursor: "pointer" }} // Change cursor style on hover
         >
-          {displayName}
-          <DocStringComponent docString={docString} />
-          {open ? <ChevronDown /> : <ChevronRight />}
+          <span>
+            {displayName}
+            <DocStringComponent docString={docString} />
+          </span>
+          <span className="pydase-component-actions">
+            {selectionEnabled && displayedSelection !== null && (
+              <Button
+                aria-label="Clear image selection"
+                title="Clear image selection"
+                size="sm"
+                variant="outline-secondary"
+                onClick={clearSelection}>
+                <XCircle />
+              </Button>
+            )}
+            {open ? <ChevronDown /> : <ChevronRight />}
+          </span>
         </Card.Header>
         <Collapse in={open}>
           <Card.Body>
@@ -380,7 +598,13 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
                 ref={canvasRef}
                 width={width}
                 height={height}
-                style={{ maxWidth: "100%", height: "auto" }}
+                className={["pydase-image-canvas", selectionEnabled ? "selectable" : ""]
+                  .filter(Boolean)
+                  .join(" ")}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={finishSelection}
+                onPointerCancel={cancelSelection}
               />
             ) : (
               <BootstrapImage

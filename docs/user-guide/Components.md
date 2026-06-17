@@ -196,6 +196,12 @@ underlying image pixels. Overlay coordinates are image pixel coordinates, so the
 aligned when the browser scales the image. Supported overlay types are `grid`, `ticks`,
 `rect`, `circle`, `cross`, `point`, `line`, and `text`.
 
+Images can optionally accept frontend area selections. With
+`Image(selection_enabled=True)`, users can drag over the image to draw a rectangular
+selection. The backend can read the selected image-pixel coordinates from
+`image.selection`, which contains `x`, `y`, `width`, and `height`. A zero width or
+height means that no selection is active.
+
 ```python
 import matplotlib.pyplot as plt
 import numpy as np
@@ -204,7 +210,7 @@ from pydase.components.image import Image
 
 
 class MyDataService(pydase.DataService):
-    my_image = Image()
+    my_image = Image(selection_enabled=True)
 
 
 if __name__ == "__main__":
@@ -245,6 +251,9 @@ if __name__ == "__main__":
             {"type": "cross", "x": 160, "y": 120, "size": 8, "color": "#ffcc00"},
         ]
     )
+
+    # after a user drags in the frontend, the backend can read the selected box
+    selected_box = service.my_image.selection
 
     # save the latest raw frame as PNG when needed
     service.my_image.save_to_png("/your/image/path/snapshot.png")

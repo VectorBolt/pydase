@@ -183,6 +183,72 @@ def test_image_overlay_update_notifies_observer_once() -> None:
     assert notifications == ["my_image.overlays"]
 
 
+def test_image_selection_management() -> None:
+    callback_values: list[dict[str, int]] = []
+    image = pydase.components.Image(
+        selection_enabled=True,
+        on_selection_change=callback_values.append,
+    )
+
+    image.selection = {"x": 12, "y": 8, "width": 40, "height": 30}
+    selection = image.selection
+    selection["x"] = 99
+
+    assert image.selection_enabled is True
+    assert image.selection == {"x": 12, "y": 8, "width": 40, "height": 30}
+    assert callback_values == [{"x": 12, "y": 8, "width": 40, "height": 30}]
+
+    image.clear_selection()
+
+    assert image.selection == {"x": 0, "y": 0, "width": 0, "height": 0}
+    assert callback_values[-1] == {"x": 0, "y": 0, "width": 0, "height": 0}
+
+
+def test_image_selection_update_notifies_observer_once() -> None:
+    class MyService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.my_image = pydase.components.Image(selection_enabled=True)
+
+    service_instance = MyService()
+    state_manager = StateManager(service_instance)
+    observer = DataServiceObserver(state_manager)
+    notifications: list[str] = []
+    observer.add_notification_callback(
+        lambda full_access_path, _value, _cached_value_dict: notifications.append(
+            full_access_path
+        )
+    )
+
+    service_instance.my_image.selection = {
+        "x": 12,
+        "y": 8,
+        "width": 40,
+        "height": 30,
+    }
+
+    assert notifications == ["my_image.selection"]
+
+
+def test_image_selection_validation() -> None:
+    image = pydase.components.Image()
+
+    with raises(TypeError, match="selection_enabled must be a bool"):
+        pydase.components.Image(selection_enabled="yes")  # type: ignore[arg-type]
+
+    with raises(ValueError, match="missing required"):
+        image.selection = {"x": 1, "y": 2, "width": 3}
+
+    with raises(TypeError, match="must be an integer"):
+        image.selection = {"x": 1.0, "y": 2, "width": 3, "height": 4}
+
+    with raises(ValueError, match="non-negative"):
+        image.selection = {"x": -1, "y": 2, "width": 3, "height": 4}
+
+    with raises(ValueError, match="empty or have positive"):
+        image.selection = {"x": 0, "y": 0, "width": 0, "height": 4}
+
+
 def test_image_overlay_validation() -> None:
     image = pydase.components.Image()
 
@@ -238,10 +304,16 @@ def test_image_serialization() -> None:
     assert image["full_access_path"] == "my_image"
     assert image["name"] == "Image"
     assert image["type"] == "Image"
+    assert image["value"]["selection_enabled"]["value"] is False
+    assert image["value"]["selection"]["value"]["x"]["value"] == 0
+    assert image["value"]["selection"]["value"]["y"]["value"] == 0
+    assert image["value"]["selection"]["value"]["width"]["value"] == 0
+    assert image["value"]["selection"]["value"]["height"]["value"] == 0
 
     assert set(image_value) == {
         "add_overlay",
         "clear_overlays",
+        "clear_selection",
         "color_mode",
         "format",
         "height",
@@ -251,6 +323,8 @@ def test_image_serialization() -> None:
         "load_from_path",
         "load_from_url",
         "save_to_png",
+        "selection",
+        "selection_enabled",
         "set_overlays",
         "overlays",
         "to_png_bytes",

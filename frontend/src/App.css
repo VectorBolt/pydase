@@ -50,6 +50,16 @@ input.instantUpdate {
   flex-shrink: 0;
   gap: 0.5rem;
 }
+.pydase-image-canvas {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  user-select: none;
+}
+.pydase-image-canvas.selectable {
+  cursor: crosshair;
+  touch-action: none;
+}
 .pydase-text-area-output {
   min-height: 120px;
   resize: vertical;
