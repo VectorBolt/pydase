@@ -272,7 +272,7 @@ class Image(DataService):
     def clear_selection(self) -> None:
         """Clear the frontend image-region selection."""
 
-        self.selection = None
+        self.selection = self._empty_selection()
 
     def _load_from_base64(
         self,

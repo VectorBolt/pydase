@@ -183,7 +183,7 @@ def test_image_overlay_update_notifies_observer_once() -> None:
     assert notifications == ["my_image.overlays"]
 
 
-def test_image_selection_management() -> None:
+def test_image_selection_management(caplog: LogCaptureFixture) -> None:
     callback_values: list[dict[str, int]] = []
     image = pydase.components.Image(
         selection_enabled=True,
@@ -198,10 +198,13 @@ def test_image_selection_management() -> None:
     assert image.selection == {"x": 12, "y": 8, "width": 40, "height": 30}
     assert callback_values == [{"x": 12, "y": 8, "width": 40, "height": 30}]
 
+    caplog.clear()
+
     image.clear_selection()
 
     assert image.selection == {"x": 0, "y": 0, "width": 0, "height": 0}
     assert callback_values[-1] == {"x": 0, "y": 0, "width": 0, "height": 0}
+    assert "Class 'NoneType' does not inherit from DataService" not in caplog.text
 
 
 def test_image_selection_update_notifies_observer_once() -> None:
