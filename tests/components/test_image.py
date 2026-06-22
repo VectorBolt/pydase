@@ -21,6 +21,7 @@ EXPECTED_RAW_WIDTH = 2
 CAMERA_FRAME_HEIGHT = 240
 CAMERA_FRAME_WIDTH = 320
 CAMERA_FRAME_CHANNELS = 3
+STRESS_FRAME_SIDE_LENGTH = 2
 
 
 class FakeArray:
@@ -121,6 +122,87 @@ def test_image_loads_camera_frame_like_array() -> None:
     assert service.camera.height == CAMERA_FRAME_HEIGHT
     assert service.camera.color_mode == "RGB"
     assert base64.b64decode(service.camera.value) == frame_data
+
+
+def test_image_load_from_array_notifies_public_fields_once() -> None:
+    class CameraService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.camera = pydase.components.Image()
+
+    service = CameraService()
+    state_manager = StateManager(service)
+    observer = DataServiceObserver(state_manager)
+    notifications: list[str] = []
+    observer.add_notification_callback(
+        lambda full_access_path, _value, _cached_value_dict: notifications.append(
+            full_access_path
+        )
+    )
+
+    service.camera.load_from_array(FakeArray((1, 2, 3), bytes([1, 2, 3, 4, 5, 6])))
+
+    assert notifications == [
+        "camera.width",
+        "camera.height",
+        "camera.color_mode",
+        "camera.format",
+        "camera.value",
+    ]
+    assert all(
+        not path_part.startswith("_")
+        for notification in notifications
+        for path_part in notification.split(".")
+    )
+
+    notifications.clear()
+
+    service.camera.load_from_array(FakeArray((1, 2, 3), bytes([7, 8, 9, 10, 11, 12])))
+
+    assert notifications == ["camera.value"]
+
+
+def test_image_load_from_array_stress_updates_cache() -> None:
+    class CameraService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.camera = pydase.components.Image()
+
+    service = CameraService()
+    state_manager = StateManager(service)
+    observer = DataServiceObserver(state_manager)
+    notifications: list[str] = []
+    observer.add_notification_callback(
+        lambda full_access_path, _value, _cached_value_dict: notifications.append(
+            full_access_path
+        )
+    )
+
+    latest_frame = b""
+    for frame_index in range(100):
+        latest_frame = bytes((frame_index + offset) % 256 for offset in range(12))
+        service.camera.load_from_array(
+            FakeArray(
+                (STRESS_FRAME_SIDE_LENGTH, STRESS_FRAME_SIDE_LENGTH, 3),
+                latest_frame,
+            )
+        )
+
+    assert all(
+        not path_part.startswith("_")
+        for notification in notifications
+        for path_part in notification.split(".")
+    )
+    assert state_manager.cache_manager.get_value_dict_from_cache("camera.width")[
+        "value"
+    ] == STRESS_FRAME_SIDE_LENGTH
+    assert state_manager.cache_manager.get_value_dict_from_cache("camera.height")[
+        "value"
+    ] == STRESS_FRAME_SIDE_LENGTH
+    assert (
+        state_manager.cache_manager.get_value_dict_from_cache("camera.value")["value"]
+        == base64.b64encode(latest_frame).decode("utf-8")
+    )
 
 
 def test_image_overlay_management() -> None:

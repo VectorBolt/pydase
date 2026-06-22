@@ -284,11 +284,15 @@ class Image(DataService):
         color_mode: str = "",
     ) -> None:
         value = value_.decode("utf-8")
-        self._set_if_changed("_width", width)
-        self._set_if_changed("_height", height)
-        self._set_if_changed("_color_mode", color_mode)
-        self._set_if_changed("_format", format_)
-        self._set_if_changed("_value", value)
+        self._set_image_fields_if_changed(
+            [
+                ("width", "_width", width),
+                ("height", "_height", height),
+                ("color_mode", "_color_mode", color_mode),
+                ("format", "_format", format_),
+                ("value", "_value", value),
+            ]
+        )
 
     def _get_image_format_from_bytes(self, value_: bytes) -> str | None:
         format_map = {
@@ -305,6 +309,27 @@ class Image(DataService):
     def _set_if_changed(self, name: str, value: Any) -> None:
         if getattr(self, name) != value:
             setattr(self, name, value)
+
+    def _set_image_fields_if_changed(
+        self,
+        fields: list[tuple[str, str, str | int]],
+    ) -> None:
+        changed_fields = [
+            (public_name, private_name, value)
+            for public_name, private_name, value in fields
+            if getattr(self, private_name) != value
+        ]
+        if not changed_fields:
+            return
+
+        for public_name, _private_name, _value in changed_fields:
+            self._notify_change_start(public_name)
+
+        for _public_name, private_name, value in changed_fields:
+            object.__setattr__(self, private_name, value)
+
+        for public_name, _private_name, value in changed_fields:
+            self._notify_changed(public_name, value)
 
     def _set_overlays_if_changed(self, overlays: list[ImageOverlay]) -> None:
         if self._overlays == overlays:
