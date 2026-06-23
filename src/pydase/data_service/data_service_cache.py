@@ -7,7 +7,9 @@ from pydase.utils.helpers import (
     parse_full_access_path,
 )
 from pydase.utils.serialization.serializer import (
+    SerializationPathError,
     Serializer,
+    get_container_item_by_key,
     get_nested_dict_by_path,
     set_nested_value_by_path,
 )
@@ -67,6 +69,9 @@ class DataServiceCache:
     def serialize_value_for_cache(
         self, full_access_path: str, value: Any
     ) -> SerializedObject:
+        if self._is_inside_cached_image_component(full_access_path):
+            return self._serialize_value_with_cached_metadata(full_access_path, value)
+
         path_parts = parse_full_access_path(full_access_path)
         parent_obj = get_object_by_path_parts(self.service, path_parts[:-1])
         attr_name = path_parts[-1]
@@ -85,3 +90,42 @@ class DataServiceCache:
             )
 
         return Serializer.serialize_object(value, access_path=full_access_path)
+
+    def _serialize_value_with_cached_metadata(
+        self,
+        full_access_path: str,
+        value: Any,
+    ) -> SerializedObject:
+        serialized_value = Serializer.serialize_object(
+            value,
+            access_path=full_access_path,
+        )
+        try:
+            cached_value_dict = self.get_value_dict_from_cache(full_access_path)
+        except (SerializationPathError, KeyError):
+            return serialized_value
+
+        serialized_value["readonly"] = cached_value_dict["readonly"]
+        serialized_value["doc"] = cached_value_dict["doc"]
+        return serialized_value
+
+    def _is_inside_cached_image_component(self, full_access_path: str) -> bool:
+        path_parts = parse_full_access_path(full_access_path)
+        current_dict = cast("dict[Any, SerializedObject]", self._cache["value"])
+
+        try:
+            for index, path_part in enumerate(path_parts):
+                serialized_object = get_container_item_by_key(
+                    current_dict, path_part, allow_append=False
+                )
+                if serialized_object.get("type") == "Image":
+                    return index < len(path_parts) - 1
+
+                value = serialized_object.get("value")
+                if not isinstance(value, dict | list):
+                    return False
+                current_dict = cast("dict[Any, SerializedObject]", value)
+        except (SerializationPathError, KeyError):
+            return False
+
+        return False

@@ -8,6 +8,7 @@ from pytest import LogCaptureFixture, MonkeyPatch, raises
 import pydase
 import pydase.components
 import pydase.components.image as image_module
+import pydase.observer_pattern.observer.property_observer as property_observer_module
 from pydase.data_service.data_service_observer import DataServiceObserver
 from pydase.data_service.state_manager import StateManager
 from pydase.utils.serialization.serializer import dump
@@ -203,6 +204,40 @@ def test_image_load_from_array_stress_updates_cache() -> None:
         state_manager.cache_manager.get_value_dict_from_cache("camera.value")["value"]
         == base64.b64encode(latest_frame).decode("utf-8")
     )
+
+
+def test_image_update_through_property_path_does_not_rescan_dependencies(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    class Preview(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.image = pydase.components.Image()
+
+    class CameraService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self._preview = Preview()
+
+        @property
+        def preview(self) -> Preview:
+            return self._preview
+
+    service = CameraService()
+    preview = service.preview
+    state_manager = StateManager(service)
+    DataServiceObserver(state_manager)
+
+    def fail_getsource(_obj: object) -> str:
+        raise AssertionError("property dependencies were rescanned")
+
+    monkeypatch.setattr(property_observer_module.inspect, "getsource", fail_getsource)
+
+    preview.image.load_from_array(FakeArray((1, 2, 3), bytes([1, 2, 3, 4, 5, 6])))
+
+    assert state_manager.cache_manager.get_value_dict_from_cache(
+        "preview.image.value"
+    )["value"] == base64.b64encode(bytes([1, 2, 3, 4, 5, 6])).decode("utf-8")
 
 
 def test_image_overlay_management() -> None:
