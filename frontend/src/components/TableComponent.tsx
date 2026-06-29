@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Badge, Card, Collapse, Table as BootstrapTable } from "react-bootstrap";
 import { ChevronDown, ChevronRight } from "react-bootstrap-icons";
 import { DocStringComponent } from "./DocStringComponent";
@@ -120,6 +120,12 @@ const getSelectedIndices = (selectedIndicesObject: SerializedObject): number[] =
     .map((item) => item.value as number);
 };
 
+const selectedIndicesAreEqual = (left: number[], right: number[]): boolean => {
+  return (
+    left.length === right.length && left.every((value, index) => value === right[index])
+  );
+};
+
 const getColumnClassNames = (rows: TableCell[][], columns: string[]): string[] => {
   return columns.map((_, columnIndex) => {
     const values = rows
@@ -162,6 +168,9 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
   const [selectedRowIndices, setSelectedRowIndices] = useState(
     getSelectedIndices(serializedSelectedIndices),
   );
+  const selectedRowIndicesRef = useRef(selectedRowIndices);
+  const pendingSelectedRowIndicesRef = useRef<number[] | null>(null);
+  const latestServerSelectedRowIndicesRef = useRef(selectedRowIndices);
   const columns = useMemo(() => getColumns(serializedColumns), [serializedColumns]);
   const rows = useMemo(
     () => getRows(serializedRows, columns),
@@ -171,32 +180,73 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
     () => getColumnClassNames(rows, columns),
     [rows, columns],
   );
+  const hasChangeCallback = props.changeCallback !== undefined;
 
   useEffect(() => {
     addNotification(`${fullAccessPath} changed.`);
   }, [props.columns, props.rows]);
 
   useEffect(() => {
-    setSelectedRowIndices(getSelectedIndices(serializedSelectedIndices));
+    const nextSelectedRowIndices = getSelectedIndices(serializedSelectedIndices);
+    latestServerSelectedRowIndicesRef.current = nextSelectedRowIndices;
+
+    if (pendingSelectedRowIndicesRef.current !== null) {
+      if (
+        !selectedIndicesAreEqual(
+          nextSelectedRowIndices,
+          pendingSelectedRowIndicesRef.current,
+        )
+      ) {
+        return;
+      }
+      pendingSelectedRowIndicesRef.current = null;
+    }
+
+    selectedRowIndicesRef.current = nextSelectedRowIndices;
+    setSelectedRowIndices(nextSelectedRowIndices);
   }, [serializedSelectedIndices]);
 
   const isSelectionEnabled = selectionMode !== "none";
 
   const updateSelectedIndices = (indices: number[]) => {
+    selectedRowIndicesRef.current = indices;
+    if (hasChangeCallback) {
+      pendingSelectedRowIndicesRef.current = indices;
+    }
     setSelectedRowIndices(indices);
-    changeCallback({
-      type: "list",
-      value: indices.map((index, listIndex) => ({
-        type: "int",
-        value: index,
-        full_access_path: `${serializedSelectedIndices.full_access_path}[${listIndex}]`,
+    changeCallback(
+      {
+        type: "list",
+        value: indices.map((index, listIndex) => ({
+          type: "int",
+          value: index,
+          full_access_path: `${serializedSelectedIndices.full_access_path}[${listIndex}]`,
+          readonly: false,
+          doc: null,
+        })),
+        full_access_path: serializedSelectedIndices.full_access_path,
         readonly: false,
-        doc: null,
-      })),
-      full_access_path: serializedSelectedIndices.full_access_path,
-      readonly: false,
-      doc: serializedSelectedIndices.doc,
-    });
+        doc: serializedSelectedIndices.doc,
+      },
+      (ack) => {
+        if (
+          !ack ||
+          typeof ack !== "object" ||
+          !("type" in ack) ||
+          ack.type !== "Exception"
+        ) {
+          return;
+        }
+
+        pendingSelectedRowIndicesRef.current = null;
+        selectedRowIndicesRef.current = latestServerSelectedRowIndicesRef.current;
+        setSelectedRowIndices(latestServerSelectedRowIndicesRef.current);
+        addNotification(
+          `Failed to update ${fullAccessPath}.selected_indices.`,
+          "ERROR",
+        );
+      },
+    );
   };
 
   const toggleRowSelection = (rowIndex: number) => {
@@ -204,14 +254,16 @@ export const TableComponent = React.memo((props: TableComponentProps) => {
       return;
     }
 
+    const selectedIndices = selectedRowIndicesRef.current;
+
     if (selectionMode === "single") {
-      updateSelectedIndices(selectedRowIndices.includes(rowIndex) ? [] : [rowIndex]);
+      updateSelectedIndices(selectedIndices.includes(rowIndex) ? [] : [rowIndex]);
       return;
     }
 
-    const nextSelectedIndices = selectedRowIndices.includes(rowIndex)
-      ? selectedRowIndices.filter((index) => index !== rowIndex)
-      : [...selectedRowIndices, rowIndex].sort((a, b) => a - b);
+    const nextSelectedIndices = selectedIndices.includes(rowIndex)
+      ? selectedIndices.filter((index) => index !== rowIndex)
+      : [...selectedIndices, rowIndex].sort((a, b) => a - b);
     updateSelectedIndices(nextSelectedIndices);
   };
 
