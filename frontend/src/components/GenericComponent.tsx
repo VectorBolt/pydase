@@ -132,6 +132,26 @@ const deserializeImageSelection = (
   };
 };
 
+const deserializeImageCoordinate = (
+  attribute: SerializedObject | undefined,
+  fallback: { x: number; y: number },
+): { x: number; y: number } => {
+  if (!attribute || attribute.type !== "dict") {
+    return fallback;
+  }
+
+  const x = attribute.value["x"];
+  const y = attribute.value["y"];
+  const xValue = x?.type === "int" || x?.type === "float" ? Number(x.value) : null;
+  const yValue = y?.type === "int" || y?.type === "float" ? Number(y.value) : null;
+
+  if (xValue === null || yValue === null) {
+    return fallback;
+  }
+
+  return { x: xValue, y: yValue };
+};
+
 export const GenericComponent = React.memo(
   ({ attribute, isInstantUpdate, addNotification }: GenericComponentProps) => {
     const { full_access_path: fullAccessPath } = attribute;
@@ -326,6 +346,17 @@ export const GenericComponent = React.memo(
           hoverPositionDocString={attribute.value["hover_position"]?.doc ?? null}
           hoverPositionUpdateInterval={Number(
             attribute.value["hover_position_update_interval"]?.["value"] ?? 0.1,
+          )}
+          hoverCoordinateOffset={deserializeImageCoordinate(
+            attribute.value["hover_coordinate_offset"],
+            { x: 0, y: 0 },
+          )}
+          hoverCoordinateScale={deserializeImageCoordinate(
+            attribute.value["hover_coordinate_scale"],
+            { x: 1, y: 1 },
+          )}
+          hoverCoordinatePrecision={Number(
+            attribute.value["hover_coordinate_precision"]?.["value"] ?? 3,
           )}
           changeCallback={changeCallback}
         />

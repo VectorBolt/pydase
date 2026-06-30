@@ -25,6 +25,9 @@ CAMERA_FRAME_CHANNELS = 3
 STRESS_FRAME_SIDE_LENGTH = 2
 HOVER_POSITION_UPDATE_INTERVAL = 0.05
 DEFAULT_HOVER_POSITION_UPDATE_INTERVAL = 0.1
+HOVER_COORDINATE_PRECISION = 2
+UPDATED_HOVER_COORDINATE_PRECISION = 4
+DEFAULT_HOVER_COORDINATE_PRECISION = 3
 
 
 class FakeArray:
@@ -353,21 +356,21 @@ def test_image_selection_update_notifies_observer_once() -> None:
 
 
 def test_image_hover_position_management(caplog: LogCaptureFixture) -> None:
-    callback_values: list[dict[str, int | bool]] = []
+    callback_values: list[dict[str, int | float | bool]] = []
     image = pydase.components.Image(
         hover_position_enabled=True,
         on_hover_position_change=callback_values.append,
         hover_position_update_interval=HOVER_POSITION_UPDATE_INTERVAL,
     )
 
-    image.hover_position = {"x": 12, "y": 8, "hovering": True}
+    image.hover_position = {"x": 12.5, "y": -8, "hovering": True}
     hover_position = image.hover_position
     hover_position["x"] = 99
 
     assert image.hover_position_enabled is True
     assert image.hover_position_update_interval == HOVER_POSITION_UPDATE_INTERVAL
-    assert image.hover_position == {"x": 12, "y": 8, "hovering": True}
-    assert callback_values == [{"x": 12, "y": 8, "hovering": True}]
+    assert image.hover_position == {"x": 12.5, "y": -8, "hovering": True}
+    assert callback_values == [{"x": 12.5, "y": -8, "hovering": True}]
 
     caplog.clear()
 
@@ -376,6 +379,31 @@ def test_image_hover_position_management(caplog: LogCaptureFixture) -> None:
     assert image.hover_position == {"x": 0, "y": 0, "hovering": False}
     assert callback_values[-1] == {"x": 0, "y": 0, "hovering": False}
     assert "Class 'NoneType' does not inherit from DataService" not in caplog.text
+
+
+def test_image_hover_coordinate_transform_management() -> None:
+    image = pydase.components.Image(
+        hover_coordinate_offset={"x": 1200, "y": -800},
+        hover_coordinate_scale=(0.25, -0.5),
+        hover_coordinate_precision=HOVER_COORDINATE_PRECISION,
+    )
+
+    offset = image.hover_coordinate_offset
+    offset["x"] = 99
+    scale = image.hover_coordinate_scale
+    scale["y"] = 99
+
+    assert image.hover_coordinate_offset == {"x": 1200.0, "y": -800.0}
+    assert image.hover_coordinate_scale == {"x": 0.25, "y": -0.5}
+    assert image.hover_coordinate_precision == HOVER_COORDINATE_PRECISION
+
+    image.hover_coordinate_offset = [10, 20]
+    image.hover_coordinate_scale = {"x": 2, "y": 3}
+    image.hover_coordinate_precision = UPDATED_HOVER_COORDINATE_PRECISION
+
+    assert image.hover_coordinate_offset == {"x": 10.0, "y": 20.0}
+    assert image.hover_coordinate_scale == {"x": 2.0, "y": 3.0}
+    assert image.hover_coordinate_precision == UPDATED_HOVER_COORDINATE_PRECISION
 
 
 def test_image_hover_position_update_notifies_observer_once() -> None:
@@ -445,18 +473,40 @@ def test_image_hover_position_validation() -> None:
     with raises(ValueError, match="missing required"):
         image.hover_position = {"x": 1, "y": 2}
 
-    with raises(TypeError, match="must be an integer"):
-        image.hover_position = {"x": 1.0, "y": 2, "hovering": True}
+    with raises(TypeError, match="must be a number"):
+        image.hover_position = {"x": "1", "y": 2, "hovering": True}
 
     with raises(TypeError, match="must be a bool"):
         image.hover_position = {"x": 1, "y": 2, "hovering": 1}
 
-    with raises(ValueError, match="non-negative"):
-        image.hover_position = {"x": -1, "y": 2, "hovering": True}
+    with raises(ValueError, match="must be finite"):
+        image.hover_position = {"x": float("nan"), "y": 2, "hovering": True}
 
     image.hover_position = {"x": 12, "y": 8, "hovering": False}
 
     assert image.hover_position == {"x": 0, "y": 0, "hovering": False}
+
+
+def test_image_hover_coordinate_transform_validation() -> None:
+    image = pydase.components.Image()
+
+    with raises(TypeError, match="hover_coordinate_offset must be"):
+        image.hover_coordinate_offset = "1,2"  # type: ignore[assignment]
+
+    with raises(ValueError, match="missing required"):
+        image.hover_coordinate_scale = {"x": 1}
+
+    with raises(TypeError, match="hover_coordinate_scale y must be a number"):
+        image.hover_coordinate_scale = {"x": 1, "y": object()}
+
+    with raises(ValueError, match="hover_coordinate_offset x must be finite"):
+        image.hover_coordinate_offset = {"x": float("inf"), "y": 0}
+
+    with raises(TypeError, match="hover_coordinate_precision must be an integer"):
+        image.hover_coordinate_precision = 1.5  # type: ignore[assignment]
+
+    with raises(ValueError, match="hover_coordinate_precision must be non-negative"):
+        image.hover_coordinate_precision = -1
 
 
 def test_image_overlay_validation() -> None:
@@ -527,6 +577,14 @@ def test_image_serialization() -> None:
         image["value"]["hover_position_update_interval"]["value"]
         == DEFAULT_HOVER_POSITION_UPDATE_INTERVAL
     )
+    assert image["value"]["hover_coordinate_offset"]["value"]["x"]["value"] == 0.0
+    assert image["value"]["hover_coordinate_offset"]["value"]["y"]["value"] == 0.0
+    assert image["value"]["hover_coordinate_scale"]["value"]["x"]["value"] == 1.0
+    assert image["value"]["hover_coordinate_scale"]["value"]["y"]["value"] == 1.0
+    assert (
+        image["value"]["hover_coordinate_precision"]["value"]
+        == DEFAULT_HOVER_COORDINATE_PRECISION
+    )
 
     assert set(image_value) == {
         "add_overlay",
@@ -536,6 +594,9 @@ def test_image_serialization() -> None:
         "color_mode",
         "format",
         "height",
+        "hover_coordinate_offset",
+        "hover_coordinate_precision",
+        "hover_coordinate_scale",
         "hover_position",
         "hover_position_enabled",
         "hover_position_update_interval",

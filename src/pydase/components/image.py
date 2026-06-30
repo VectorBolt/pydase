@@ -1,6 +1,7 @@
 import base64
 import io
 import logging
+import math
 import struct
 import zlib
 from collections.abc import Callable, Mapping
@@ -16,7 +17,11 @@ if TYPE_CHECKING:
 OverlayValue: TypeAlias = str | int | float | bool | None
 ImageOverlay: TypeAlias = dict[str, OverlayValue]
 ImageSelection: TypeAlias = dict[str, int]
-ImageHoverPosition: TypeAlias = dict[str, int | bool]
+ImageHoverPosition: TypeAlias = dict[str, int | float | bool]
+ImageCoordinate: TypeAlias = dict[str, float]
+ImageCoordinateInput: TypeAlias = (
+    Mapping[str, Any] | tuple[float, float] | list[float] | None
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +31,7 @@ class Image(DataService):
     _GRAYSCALE_DIMENSIONS = 2
     _COLOR_DIMENSIONS = 3
     _SUPPORTED_RAW_CHANNEL_COUNTS: ClassVar[set[int]] = {1, 3, 4}
+    _COORDINATE_PAIR_LENGTH: ClassVar[int] = 2
     _SUPPORTED_RAW_COLOR_MODES: ClassVar[dict[str, int]] = {
         "L": 1,
         "RGB": 3,
@@ -82,7 +88,7 @@ class Image(DataService):
     }
     _BOOLEAN_OVERLAY_KEYS: ClassVar[set[str]] = {"show_labels"}
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         selection_enabled: bool = False,
@@ -90,6 +96,9 @@ class Image(DataService):
         hover_position_enabled: bool = False,
         on_hover_position_change: Callable[[ImageHoverPosition], None] | None = None,
         hover_position_update_interval: float = 0.1,
+        hover_coordinate_offset: ImageCoordinateInput = None,
+        hover_coordinate_scale: ImageCoordinateInput = None,
+        hover_coordinate_precision: int = 3,
     ) -> None:
         super().__init__()
         if not isinstance(selection_enabled, bool):
@@ -112,6 +121,21 @@ class Image(DataService):
             self._normalise_hover_position_update_interval(
                 hover_position_update_interval
             )
+        )
+        self._hover_coordinate_offset = self._normalise_coordinate(
+            hover_coordinate_offset,
+            default_x=0,
+            default_y=0,
+            name="hover_coordinate_offset",
+        )
+        self._hover_coordinate_scale = self._normalise_coordinate(
+            hover_coordinate_scale,
+            default_x=1,
+            default_y=1,
+            name="hover_coordinate_scale",
+        )
+        self._hover_coordinate_precision = self._normalise_hover_coordinate_precision(
+            hover_coordinate_precision
         )
 
     @property
@@ -197,10 +221,13 @@ class Image(DataService):
 
     @property
     def hover_position(self) -> ImageHoverPosition:
-        """Current frontend hover position in image pixels.
+        """Current frontend hover position in the configured coordinate system.
 
         The dictionary contains ``x``, ``y``, and ``hovering``. When ``hovering`` is
-        ``False``, the pointer is not over the image and ``x``/``y`` are zero.
+        ``False``, the pointer is not over the image and ``x``/``y`` are zero. By
+        default this coordinate system is image pixels. Configure
+        ``hover_coordinate_offset`` and ``hover_coordinate_scale`` to display and
+        receive another coordinate system.
         """
 
         return dict(self._hover_position)
@@ -214,6 +241,58 @@ class Image(DataService):
         object.__setattr__(self, "_hover_position", normalised_hover_position)
         if self._on_hover_position_change is not None:
             self._on_hover_position_change(dict(normalised_hover_position))
+
+    @property
+    def hover_coordinate_offset(self) -> ImageCoordinate:
+        """Offset applied to hover coordinates before display and callbacks."""
+
+        return dict(self._hover_coordinate_offset)
+
+    @hover_coordinate_offset.setter
+    def hover_coordinate_offset(self, value: ImageCoordinateInput) -> None:
+        object.__setattr__(
+            self,
+            "_hover_coordinate_offset",
+            self._normalise_coordinate(
+                value,
+                default_x=0,
+                default_y=0,
+                name="hover_coordinate_offset",
+            ),
+        )
+
+    @property
+    def hover_coordinate_scale(self) -> ImageCoordinate:
+        """Scale applied to hover image-pixel coordinates before display."""
+
+        return dict(self._hover_coordinate_scale)
+
+    @hover_coordinate_scale.setter
+    def hover_coordinate_scale(self, value: ImageCoordinateInput) -> None:
+        object.__setattr__(
+            self,
+            "_hover_coordinate_scale",
+            self._normalise_coordinate(
+                value,
+                default_x=1,
+                default_y=1,
+                name="hover_coordinate_scale",
+            ),
+        )
+
+    @property
+    def hover_coordinate_precision(self) -> int:
+        """Maximum decimal places displayed in transformed hover coordinates."""
+
+        return self._hover_coordinate_precision
+
+    @hover_coordinate_precision.setter
+    def hover_coordinate_precision(self, value: int) -> None:
+        object.__setattr__(
+            self,
+            "_hover_coordinate_precision",
+            self._normalise_hover_coordinate_precision(value),
+        )
 
     def load_from_path(self, path: Path | str) -> None:
         with open(path, "rb") as image_file:
@@ -558,11 +637,11 @@ class Image(DataService):
         return {"x": 0, "y": 0, "hovering": False}
 
     @staticmethod
-    def _normalise_hover_position_value(key: str, value: Any) -> int:
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise TypeError(f"hover_position key {key!r} must be an integer.")
-        if value < 0:
-            raise ValueError(f"hover_position key {key!r} must be non-negative.")
+    def _normalise_hover_position_value(key: str, value: Any) -> int | float:
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise TypeError(f"hover_position key {key!r} must be a number.")
+        if not math.isfinite(value):
+            raise ValueError(f"hover_position key {key!r} must be finite.")
         return value
 
     @staticmethod
@@ -572,6 +651,59 @@ class Image(DataService):
         if value < 0:
             raise ValueError("hover_position_update_interval must be non-negative.")
         return float(value)
+
+    def _normalise_coordinate(
+        self,
+        value: ImageCoordinateInput,
+        *,
+        default_x: float,
+        default_y: float,
+        name: str,
+    ) -> ImageCoordinate:
+        if value is None:
+            return {"x": float(default_x), "y": float(default_y)}
+
+        if isinstance(value, Mapping):
+            missing_keys = {"x", "y"} - value.keys()
+            if missing_keys:
+                missing_keys_str = ", ".join(sorted(missing_keys))
+                raise ValueError(
+                    f"{name} is missing required key(s): {missing_keys_str}."
+                )
+            x_value = value["x"]
+            y_value = value["y"]
+        elif (
+            isinstance(value, list | tuple)
+            and len(value) == self._COORDINATE_PAIR_LENGTH
+        ):
+            x_value, y_value = value
+        else:
+            raise TypeError(
+                f"{name} must be a dictionary-like object, a two-value sequence, "
+                "or None."
+            )
+
+        return {
+            "x": self._normalise_coordinate_value(f"{name} x", x_value),
+            "y": self._normalise_coordinate_value(f"{name} y", y_value),
+        }
+
+    @staticmethod
+    def _normalise_coordinate_value(name: str, value: Any) -> float:
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise TypeError(f"{name} must be a number.")
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite.")
+        return value
+
+    @staticmethod
+    def _normalise_hover_coordinate_precision(value: int) -> int:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError("hover_coordinate_precision must be an integer.")
+        if value < 0:
+            raise ValueError("hover_coordinate_precision must be non-negative.")
+        return value
 
     def _get_raw_image_metadata(
         self,

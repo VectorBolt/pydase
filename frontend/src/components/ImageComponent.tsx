@@ -26,6 +26,11 @@ interface ImagePoint {
   y: number;
 }
 
+interface ImageCoordinate {
+  x: number;
+  y: number;
+}
+
 interface ImageComponentProps {
   fullAccessPath: string;
   value: string;
@@ -43,6 +48,9 @@ interface ImageComponentProps {
   hoverPositionAccessPath: string;
   hoverPositionDocString: string | null;
   hoverPositionUpdateInterval: number;
+  hoverCoordinateOffset: ImageCoordinate;
+  hoverCoordinateScale: ImageCoordinate;
+  hoverCoordinatePrecision: number;
   addNotification: (message: string, levelname?: LevelName) => void;
   changeCallback?: (value: SerializedObject, callback?: (ack: unknown) => void) => void;
   displayName: string;
@@ -386,6 +394,19 @@ const serializeSelection = (
   };
 };
 
+const serializeHoverCoordinateValue = (
+  value: number,
+  fullAccessPath: string,
+): SerializedObject => {
+  return {
+    type: Number.isInteger(value) ? "int" : "float",
+    value,
+    full_access_path: fullAccessPath,
+    readonly: false,
+    doc: null,
+  } as SerializedObject;
+};
+
 const serializeHoverPosition = (
   position: ImagePoint | null,
   fullAccessPath: string,
@@ -398,20 +419,8 @@ const serializeHoverPosition = (
   return {
     type: "dict",
     value: {
-      x: {
-        type: "int",
-        value: serializedPosition.x,
-        full_access_path: `${fullAccessPath}["x"]`,
-        readonly: false,
-        doc: null,
-      },
-      y: {
-        type: "int",
-        value: serializedPosition.y,
-        full_access_path: `${fullAccessPath}["y"]`,
-        readonly: false,
-        doc: null,
-      },
+      x: serializeHoverCoordinateValue(serializedPosition.x, `${fullAccessPath}["x"]`),
+      y: serializeHoverCoordinateValue(serializedPosition.y, `${fullAccessPath}["y"]`),
       hovering: {
         type: "bool",
         value: serializedPosition.hovering,
@@ -424,6 +433,36 @@ const serializeHoverPosition = (
     readonly: false,
     doc: docString,
   };
+};
+
+const transformHoverPosition = (
+  position: ImagePoint,
+  offset: ImageCoordinate,
+  scale: ImageCoordinate,
+): ImagePoint => {
+  return {
+    x: offset.x + position.x * scale.x,
+    y: offset.y + position.y * scale.y,
+  };
+};
+
+const getSafeCoordinatePrecision = (precision: number): number => {
+  if (!Number.isFinite(precision)) {
+    return 3;
+  }
+  return clamp(Math.round(precision), 0, 12);
+};
+
+const formatHoverCoordinate = (value: number, precision: number): string => {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  if (precision === 0) {
+    return String(Math.round(value));
+  }
+
+  return value.toFixed(precision).replace(/\.?0+$/, "");
 };
 
 export const ImageComponent = React.memo((props: ImageComponentProps) => {
@@ -444,6 +483,9 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     hoverPositionAccessPath,
     hoverPositionDocString,
     hoverPositionUpdateInterval,
+    hoverCoordinateOffset,
+    hoverCoordinateScale,
+    hoverCoordinatePrecision,
     addNotification,
     changeCallback = () => {},
     displayName,
@@ -574,7 +616,16 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
       return;
     }
 
-    label.textContent = `x: ${position.x}, y: ${position.y}`;
+    const displayedPosition = transformHoverPosition(
+      position,
+      hoverCoordinateOffset,
+      hoverCoordinateScale,
+    );
+    const precision = getSafeCoordinatePrecision(hoverCoordinatePrecision);
+    label.textContent = `x: ${formatHoverCoordinate(
+      displayedPosition.x,
+      precision,
+    )}, y: ${formatHoverCoordinate(displayedPosition.y, precision)}`;
     label.style.display = "block";
 
     const cssX = (position.x / canvas.width) * bounds.width;
@@ -692,8 +743,13 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     if (hoverPositionEnabled) {
       const currentPixelPosition =
         getPointerImagePosition(event, "pixel") ?? currentPosition;
+      const transformedPosition = transformHoverPosition(
+        currentPixelPosition,
+        hoverCoordinateOffset,
+        hoverCoordinateScale,
+      );
       queueHoverPositionLabelUpdate(currentPixelPosition);
-      queueBackendHoverPositionUpdate(currentPixelPosition);
+      queueBackendHoverPositionUpdate(transformedPosition);
     }
 
     if (

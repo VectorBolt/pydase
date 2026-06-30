@@ -202,12 +202,15 @@ selection. The backend can read the selected image-pixel coordinates from
 `image.selection`, which contains `x`, `y`, `width`, and `height`. A zero width or
 height means that no selection is active.
 
-Images can also display hovered image-pixel coordinates with
+Images can also display hovered coordinates with
 `Image(hover_position_enabled=True)`. The browser renders a small coordinate badge
-locally for smooth pointer movement, and the backend can read
-`image.hover_position`, which contains `x`, `y`, and `hovering`. Optional
-`on_hover_position_change` callbacks are throttled by
-`hover_position_update_interval` seconds, which defaults to `0.1`.
+locally for smooth pointer movement, and the backend can read the same coordinates
+from `image.hover_position`, which contains `x`, `y`, and `hovering`. By default,
+these are image-pixel coordinates. For region-of-interest previews, scaled images, or
+custom coordinate grids, configure `hover_coordinate_offset` and
+`hover_coordinate_scale`. The displayed and callback coordinates are calculated as
+`offset + scale * image_pixel`. Optional `on_hover_position_change` callbacks are
+throttled by `hover_position_update_interval` seconds, which defaults to `0.1`.
 
 ```python
 import matplotlib.pyplot as plt
@@ -225,6 +228,9 @@ class MyDataService(pydase.DataService):
     my_image = Image(
         selection_enabled=True,
         hover_position_enabled=True,
+        hover_coordinate_offset={"x": 1200, "y": 800},
+        hover_coordinate_scale={"x": 0.25, "y": 0.25},
+        hover_coordinate_precision=2,
         on_hover_position_change=print_hover_position,
     )
 
