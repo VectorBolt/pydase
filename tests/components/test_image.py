@@ -23,6 +23,8 @@ CAMERA_FRAME_HEIGHT = 240
 CAMERA_FRAME_WIDTH = 320
 CAMERA_FRAME_CHANNELS = 3
 STRESS_FRAME_SIDE_LENGTH = 2
+HOVER_POSITION_UPDATE_INTERVAL = 0.05
+DEFAULT_HOVER_POSITION_UPDATE_INTERVAL = 0.1
 
 
 class FakeArray:
@@ -350,6 +352,57 @@ def test_image_selection_update_notifies_observer_once() -> None:
     assert notifications == ["my_image.selection"]
 
 
+def test_image_hover_position_management(caplog: LogCaptureFixture) -> None:
+    callback_values: list[dict[str, int | bool]] = []
+    image = pydase.components.Image(
+        hover_position_enabled=True,
+        on_hover_position_change=callback_values.append,
+        hover_position_update_interval=HOVER_POSITION_UPDATE_INTERVAL,
+    )
+
+    image.hover_position = {"x": 12, "y": 8, "hovering": True}
+    hover_position = image.hover_position
+    hover_position["x"] = 99
+
+    assert image.hover_position_enabled is True
+    assert image.hover_position_update_interval == HOVER_POSITION_UPDATE_INTERVAL
+    assert image.hover_position == {"x": 12, "y": 8, "hovering": True}
+    assert callback_values == [{"x": 12, "y": 8, "hovering": True}]
+
+    caplog.clear()
+
+    image.clear_hover_position()
+
+    assert image.hover_position == {"x": 0, "y": 0, "hovering": False}
+    assert callback_values[-1] == {"x": 0, "y": 0, "hovering": False}
+    assert "Class 'NoneType' does not inherit from DataService" not in caplog.text
+
+
+def test_image_hover_position_update_notifies_observer_once() -> None:
+    class MyService(pydase.DataService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.my_image = pydase.components.Image(hover_position_enabled=True)
+
+    service_instance = MyService()
+    state_manager = StateManager(service_instance)
+    observer = DataServiceObserver(state_manager)
+    notifications: list[str] = []
+    observer.add_notification_callback(
+        lambda full_access_path, _value, _cached_value_dict: notifications.append(
+            full_access_path
+        )
+    )
+
+    service_instance.my_image.hover_position = {
+        "x": 12,
+        "y": 8,
+        "hovering": True,
+    }
+
+    assert notifications == ["my_image.hover_position"]
+
+
 def test_image_selection_validation() -> None:
     image = pydase.components.Image()
 
@@ -367,6 +420,43 @@ def test_image_selection_validation() -> None:
 
     with raises(ValueError, match="empty or have positive"):
         image.selection = {"x": 0, "y": 0, "width": 0, "height": 4}
+
+
+def test_image_hover_position_validation() -> None:
+    image = pydase.components.Image()
+
+    with raises(TypeError, match="hover_position_enabled must be a bool"):
+        pydase.components.Image(hover_position_enabled="yes")  # type: ignore[arg-type]
+
+    with raises(
+        TypeError,
+        match="hover_position_update_interval must be a number",
+    ):
+        pydase.components.Image(
+            hover_position_update_interval="0.1"  # type: ignore[arg-type]
+        )
+
+    with raises(
+        ValueError,
+        match="hover_position_update_interval must be non-negative",
+    ):
+        pydase.components.Image(hover_position_update_interval=-0.1)
+
+    with raises(ValueError, match="missing required"):
+        image.hover_position = {"x": 1, "y": 2}
+
+    with raises(TypeError, match="must be an integer"):
+        image.hover_position = {"x": 1.0, "y": 2, "hovering": True}
+
+    with raises(TypeError, match="must be a bool"):
+        image.hover_position = {"x": 1, "y": 2, "hovering": 1}
+
+    with raises(ValueError, match="non-negative"):
+        image.hover_position = {"x": -1, "y": 2, "hovering": True}
+
+    image.hover_position = {"x": 12, "y": 8, "hovering": False}
+
+    assert image.hover_position == {"x": 0, "y": 0, "hovering": False}
 
 
 def test_image_overlay_validation() -> None:
@@ -429,14 +519,26 @@ def test_image_serialization() -> None:
     assert image["value"]["selection"]["value"]["y"]["value"] == 0
     assert image["value"]["selection"]["value"]["width"]["value"] == 0
     assert image["value"]["selection"]["value"]["height"]["value"] == 0
+    assert image["value"]["hover_position_enabled"]["value"] is False
+    assert image["value"]["hover_position"]["value"]["x"]["value"] == 0
+    assert image["value"]["hover_position"]["value"]["y"]["value"] == 0
+    assert image["value"]["hover_position"]["value"]["hovering"]["value"] is False
+    assert (
+        image["value"]["hover_position_update_interval"]["value"]
+        == DEFAULT_HOVER_POSITION_UPDATE_INTERVAL
+    )
 
     assert set(image_value) == {
         "add_overlay",
+        "clear_hover_position",
         "clear_overlays",
         "clear_selection",
         "color_mode",
         "format",
         "height",
+        "hover_position",
+        "hover_position_enabled",
+        "hover_position_update_interval",
         "load_from_array",
         "load_from_base64",
         "load_from_matplotlib_figure",

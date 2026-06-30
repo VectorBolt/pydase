@@ -50,15 +50,39 @@ input.instantUpdate {
   flex-shrink: 0;
   gap: 0.5rem;
 }
+.pydase-image-frame {
+  display: inline-block;
+  max-width: 100%;
+  position: relative;
+}
 .pydase-image-canvas {
   display: block;
   height: auto;
   max-width: 100%;
   user-select: none;
 }
-.pydase-image-canvas.selectable {
+.pydase-image-canvas.selectable,
+.pydase-image-canvas.coordinate-tracked {
   cursor: crosshair;
+}
+.pydase-image-canvas.selectable {
   touch-action: none;
+}
+.pydase-image-hover-position {
+  background: rgba(33, 37, 41, 0.78);
+  border-radius: 4px;
+  color: #fff;
+  display: none;
+  font: 12px/1.35 var(--bs-font-monospace);
+  font-variant-numeric: tabular-nums;
+  left: 0;
+  padding: 0.2rem 0.35rem;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transform: translate3d(4px, 4px, 0);
+  white-space: nowrap;
+  z-index: 1;
 }
 .pydase-text-area-output {
   min-height: 120px;

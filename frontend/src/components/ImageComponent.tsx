@@ -5,6 +5,7 @@ import { ChevronDown, ChevronRight, XCircle } from "react-bootstrap-icons";
 import { LevelName } from "./NotificationsComponent";
 import useRenderCount from "../hooks/useRenderCount";
 import { SerializedObject } from "../types/SerializedObject";
+import { propsAreEqual } from "../utils/propsAreEqual";
 
 type OverlayValue = string | number | boolean | null;
 
@@ -20,6 +21,11 @@ export interface ImageSelection {
   height: number;
 }
 
+interface ImagePoint {
+  x: number;
+  y: number;
+}
+
 interface ImageComponentProps {
   fullAccessPath: string;
   value: string;
@@ -33,6 +39,10 @@ interface ImageComponentProps {
   selectionEnabled: boolean;
   selectionAccessPath: string;
   selectionDocString: string | null;
+  hoverPositionEnabled: boolean;
+  hoverPositionAccessPath: string;
+  hoverPositionDocString: string | null;
+  hoverPositionUpdateInterval: number;
   addNotification: (message: string, levelname?: LevelName) => void;
   changeCallback?: (value: SerializedObject, callback?: (ack: unknown) => void) => void;
   displayName: string;
@@ -308,7 +318,8 @@ const clamp = (value: number, min: number, max: number): number => {
 
 const getPointerImagePosition = (
   event: React.PointerEvent<HTMLCanvasElement>,
-): { x: number; y: number } | null => {
+  coordinateMode: "edge" | "pixel" = "edge",
+): ImagePoint | null => {
   const canvas = event.currentTarget;
   if (canvas.width <= 0 || canvas.height <= 0) {
     return null;
@@ -319,24 +330,25 @@ const getPointerImagePosition = (
     return null;
   }
 
+  const scaledX = (event.clientX - bounds.left) * (canvas.width / bounds.width);
+  const scaledY = (event.clientY - bounds.top) * (canvas.height / bounds.height);
+  const isPixelCoordinate = coordinateMode === "pixel";
+
   return {
     x: clamp(
-      Math.round((event.clientX - bounds.left) * (canvas.width / bounds.width)),
+      isPixelCoordinate ? Math.floor(scaledX) : Math.round(scaledX),
       0,
-      canvas.width,
+      isPixelCoordinate ? canvas.width - 1 : canvas.width,
     ),
     y: clamp(
-      Math.round((event.clientY - bounds.top) * (canvas.height / bounds.height)),
+      isPixelCoordinate ? Math.floor(scaledY) : Math.round(scaledY),
       0,
-      canvas.height,
+      isPixelCoordinate ? canvas.height - 1 : canvas.height,
     ),
   };
 };
 
-const selectionFromPoints = (
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-): ImageSelection => {
+const selectionFromPoints = (start: ImagePoint, end: ImagePoint): ImageSelection => {
   const x = Math.min(start.x, end.x);
   const y = Math.min(start.y, end.y);
   return {
@@ -374,6 +386,46 @@ const serializeSelection = (
   };
 };
 
+const serializeHoverPosition = (
+  position: ImagePoint | null,
+  fullAccessPath: string,
+  docString: string | null,
+): SerializedObject => {
+  const serializedPosition = position
+    ? { ...position, hovering: true }
+    : { x: 0, y: 0, hovering: false };
+
+  return {
+    type: "dict",
+    value: {
+      x: {
+        type: "int",
+        value: serializedPosition.x,
+        full_access_path: `${fullAccessPath}["x"]`,
+        readonly: false,
+        doc: null,
+      },
+      y: {
+        type: "int",
+        value: serializedPosition.y,
+        full_access_path: `${fullAccessPath}["y"]`,
+        readonly: false,
+        doc: null,
+      },
+      hovering: {
+        type: "bool",
+        value: serializedPosition.hovering,
+        full_access_path: `${fullAccessPath}["hovering"]`,
+        readonly: false,
+        doc: null,
+      },
+    },
+    full_access_path: fullAccessPath,
+    readonly: false,
+    doc: docString,
+  };
+};
+
 export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const {
     fullAccessPath,
@@ -388,6 +440,10 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     selectionEnabled,
     selectionAccessPath,
     selectionDocString,
+    hoverPositionEnabled,
+    hoverPositionAccessPath,
+    hoverPositionDocString,
+    hoverPositionUpdateInterval,
     addNotification,
     changeCallback = () => {},
     displayName,
@@ -397,7 +453,13 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const renderCount = useRenderCount();
   const [open, setOpen] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
+  const hoverLabelRef = useRef<HTMLDivElement | null>(null);
+  const hoverAnimationFrameRef = useRef<number | null>(null);
+  const pendingHoverPositionRef = useRef<ImagePoint | null>(null);
+  const lastHoverBackendUpdateRef = useRef(0);
+  const hoverBackendTimeoutRef = useRef<number | null>(null);
+  const pendingBackendHoverPositionRef = useRef<ImagePoint | null>(null);
+  const dragStartRef = useRef<ImagePoint | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const [draftSelection, setDraftSelection] = useState<ImageSelection | null>(null);
   const isRawImage = format.toUpperCase() === "RAW";
@@ -406,6 +468,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     isRawImage ||
     overlays.length > 0 ||
     selectionEnabled ||
+    hoverPositionEnabled ||
     displayedSelection !== null;
 
   useEffect(() => {
@@ -486,6 +549,123 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     );
   };
 
+  const hoverBackendUpdateIntervalMs = Math.max(
+    16,
+    Number.isFinite(hoverPositionUpdateInterval)
+      ? hoverPositionUpdateInterval * 1000
+      : 100,
+  );
+
+  const updateHoverPositionLabel = (position: ImagePoint | null) => {
+    const label = hoverLabelRef.current;
+    const canvas = canvasRef.current;
+    if (!label) {
+      return;
+    }
+
+    if (!position || !canvas || canvas.width <= 0 || canvas.height <= 0) {
+      label.style.display = "none";
+      return;
+    }
+
+    const bounds = canvas.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) {
+      label.style.display = "none";
+      return;
+    }
+
+    label.textContent = `x: ${position.x}, y: ${position.y}`;
+    label.style.display = "block";
+
+    const cssX = (position.x / canvas.width) * bounds.width;
+    const cssY = (position.y / canvas.height) * bounds.height;
+    const maxLeft = Math.max(4, bounds.width - label.offsetWidth - 4);
+    const maxTop = Math.max(4, bounds.height - label.offsetHeight - 4);
+    const left = clamp(cssX + 10, 4, maxLeft);
+    const top = clamp(cssY + 10, 4, maxTop);
+    label.style.transform = `translate3d(${left}px, ${top}px, 0)`;
+  };
+
+  const queueHoverPositionLabelUpdate = (position: ImagePoint | null) => {
+    pendingHoverPositionRef.current = position;
+    if (hoverAnimationFrameRef.current !== null) {
+      return;
+    }
+
+    hoverAnimationFrameRef.current = window.requestAnimationFrame(() => {
+      hoverAnimationFrameRef.current = null;
+      updateHoverPositionLabel(pendingHoverPositionRef.current);
+    });
+  };
+
+  const clearHoverBackendTimeout = () => {
+    if (hoverBackendTimeoutRef.current !== null) {
+      window.clearTimeout(hoverBackendTimeoutRef.current);
+      hoverBackendTimeoutRef.current = null;
+    }
+  };
+
+  const sendHoverPositionToBackend = (position: ImagePoint | null) => {
+    if (!hoverPositionEnabled || hoverPositionAccessPath === "") {
+      return;
+    }
+
+    lastHoverBackendUpdateRef.current = window.performance.now();
+    changeCallback(
+      serializeHoverPosition(position, hoverPositionAccessPath, hoverPositionDocString),
+    );
+  };
+
+  const queueBackendHoverPositionUpdate = (
+    position: ImagePoint | null,
+    force = false,
+  ) => {
+    if (!hoverPositionEnabled || hoverPositionAccessPath === "") {
+      return;
+    }
+
+    const now = window.performance.now();
+    const elapsed = now - lastHoverBackendUpdateRef.current;
+    if (force || elapsed >= hoverBackendUpdateIntervalMs) {
+      pendingBackendHoverPositionRef.current = null;
+      clearHoverBackendTimeout();
+      sendHoverPositionToBackend(position);
+      return;
+    }
+
+    pendingBackendHoverPositionRef.current = position;
+    if (hoverBackendTimeoutRef.current !== null) {
+      return;
+    }
+
+    hoverBackendTimeoutRef.current = window.setTimeout(() => {
+      const nextPosition = pendingBackendHoverPositionRef.current;
+      pendingBackendHoverPositionRef.current = null;
+      hoverBackendTimeoutRef.current = null;
+      sendHoverPositionToBackend(nextPosition);
+    }, hoverBackendUpdateIntervalMs - elapsed);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (hoverAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(hoverAnimationFrameRef.current);
+      }
+      clearHoverBackendTimeout();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (hoverPositionEnabled) {
+      return;
+    }
+
+    pendingHoverPositionRef.current = null;
+    pendingBackendHoverPositionRef.current = null;
+    clearHoverBackendTimeout();
+    updateHoverPositionLabel(null);
+  }, [hoverPositionEnabled]);
+
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (!selectionEnabled || event.button !== 0) {
       return;
@@ -504,6 +684,18 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const currentPosition = getPointerImagePosition(event);
+    if (!currentPosition) {
+      return;
+    }
+
+    if (hoverPositionEnabled) {
+      const currentPixelPosition =
+        getPointerImagePosition(event, "pixel") ?? currentPosition;
+      queueHoverPositionLabelUpdate(currentPixelPosition);
+      queueBackendHoverPositionUpdate(currentPixelPosition);
+    }
+
     if (
       !selectionEnabled ||
       pointerIdRef.current !== event.pointerId ||
@@ -512,13 +704,17 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
       return;
     }
 
-    const currentPosition = getPointerImagePosition(event);
-    if (!currentPosition) {
+    event.preventDefault();
+    setDraftSelection(selectionFromPoints(dragStartRef.current, currentPosition));
+  };
+
+  const handlePointerLeave = () => {
+    if (!hoverPositionEnabled) {
       return;
     }
 
-    event.preventDefault();
-    setDraftSelection(selectionFromPoints(dragStartRef.current, currentPosition));
+    queueHoverPositionLabelUpdate(null);
+    queueBackendHoverPositionUpdate(null, true);
   };
 
   const finishSelection = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -552,6 +748,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
       pointerIdRef.current = null;
       setDraftSelection(null);
     }
+    handlePointerLeave();
   };
 
   const clearSelection = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -594,18 +791,32 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
             {format === "" && value === "" ? (
               <p>No image set in the backend.</p>
             ) : shouldRenderCanvas ? (
-              <canvas
-                ref={canvasRef}
-                width={width}
-                height={height}
-                className={["pydase-image-canvas", selectionEnabled ? "selectable" : ""]
-                  .filter(Boolean)
-                  .join(" ")}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={finishSelection}
-                onPointerCancel={cancelSelection}
-              />
+              <div className="pydase-image-frame">
+                <canvas
+                  ref={canvasRef}
+                  width={width}
+                  height={height}
+                  className={[
+                    "pydase-image-canvas",
+                    selectionEnabled ? "selectable" : "",
+                    hoverPositionEnabled ? "coordinate-tracked" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={finishSelection}
+                  onPointerCancel={cancelSelection}
+                  onPointerLeave={handlePointerLeave}
+                />
+                {hoverPositionEnabled && (
+                  <div
+                    ref={hoverLabelRef}
+                    aria-hidden="true"
+                    className="pydase-image-hover-position"
+                  />
+                )}
+              </div>
             ) : (
               <BootstrapImage
                 src={`data:image/${format.toLowerCase()};base64,${value}`}></BootstrapImage>
@@ -615,6 +826,6 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
       </Card>
     </div>
   );
-});
+}, propsAreEqual);
 
 ImageComponent.displayName = "ImageComponent";

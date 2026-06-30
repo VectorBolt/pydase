@@ -317,6 +317,16 @@ export const GenericComponent = React.memo(
           selectionEnabled={Boolean(attribute.value["selection_enabled"]?.["value"])}
           selectionAccessPath={attribute.value["selection"]["full_access_path"]}
           selectionDocString={attribute.value["selection"].doc}
+          hoverPositionEnabled={Boolean(
+            attribute.value["hover_position_enabled"]?.["value"],
+          )}
+          hoverPositionAccessPath={
+            attribute.value["hover_position"]?.["full_access_path"] ?? ""
+          }
+          hoverPositionDocString={attribute.value["hover_position"]?.doc ?? null}
+          hoverPositionUpdateInterval={Number(
+            attribute.value["hover_position_update_interval"]?.["value"] ?? 0.1,
+          )}
           changeCallback={changeCallback}
         />
       );

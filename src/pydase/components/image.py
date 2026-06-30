@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 OverlayValue: TypeAlias = str | int | float | bool | None
 ImageOverlay: TypeAlias = dict[str, OverlayValue]
 ImageSelection: TypeAlias = dict[str, int]
+ImageHoverPosition: TypeAlias = dict[str, int | bool]
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +87,15 @@ class Image(DataService):
         *,
         selection_enabled: bool = False,
         on_selection_change: Callable[[ImageSelection], None] | None = None,
+        hover_position_enabled: bool = False,
+        on_hover_position_change: Callable[[ImageHoverPosition], None] | None = None,
+        hover_position_update_interval: float = 0.1,
     ) -> None:
         super().__init__()
         if not isinstance(selection_enabled, bool):
             raise TypeError("selection_enabled must be a bool.")
+        if not isinstance(hover_position_enabled, bool):
+            raise TypeError("hover_position_enabled must be a bool.")
         self._value: str = ""
         self._format: str = ""
         self._width: int = 0
@@ -99,6 +105,14 @@ class Image(DataService):
         self._selection_enabled = selection_enabled
         self._selection: ImageSelection = self._empty_selection()
         self._on_selection_change = on_selection_change
+        self._hover_position_enabled = hover_position_enabled
+        self._hover_position: ImageHoverPosition = self._empty_hover_position()
+        self._on_hover_position_change = on_hover_position_change
+        self._hover_position_update_interval = (
+            self._normalise_hover_position_update_interval(
+                hover_position_update_interval
+            )
+        )
 
     @property
     def value(self) -> str:
@@ -154,6 +168,52 @@ class Image(DataService):
         object.__setattr__(self, "_selection", normalised_selection)
         if self._on_selection_change is not None:
             self._on_selection_change(dict(normalised_selection))
+
+    @property
+    def hover_position_enabled(self) -> bool:
+        """Whether the frontend tracks and displays hovered image-pixel coordinates."""
+
+        return self._hover_position_enabled
+
+    @hover_position_enabled.setter
+    def hover_position_enabled(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError("hover_position_enabled must be a bool.")
+        object.__setattr__(self, "_hover_position_enabled", value)
+
+    @property
+    def hover_position_update_interval(self) -> float:
+        """Minimum seconds between backend hover-position updates."""
+
+        return self._hover_position_update_interval
+
+    @hover_position_update_interval.setter
+    def hover_position_update_interval(self, value: float) -> None:
+        object.__setattr__(
+            self,
+            "_hover_position_update_interval",
+            self._normalise_hover_position_update_interval(value),
+        )
+
+    @property
+    def hover_position(self) -> ImageHoverPosition:
+        """Current frontend hover position in image pixels.
+
+        The dictionary contains ``x``, ``y``, and ``hovering``. When ``hovering`` is
+        ``False``, the pointer is not over the image and ``x``/``y`` are zero.
+        """
+
+        return dict(self._hover_position)
+
+    @hover_position.setter
+    def hover_position(self, value: Mapping[str, Any] | None) -> None:
+        normalised_hover_position = self._normalise_hover_position(value)
+        if self._hover_position == normalised_hover_position:
+            return
+
+        object.__setattr__(self, "_hover_position", normalised_hover_position)
+        if self._on_hover_position_change is not None:
+            self._on_hover_position_change(dict(normalised_hover_position))
 
     def load_from_path(self, path: Path | str) -> None:
         with open(path, "rb") as image_file:
@@ -273,6 +333,11 @@ class Image(DataService):
         """Clear the frontend image-region selection."""
 
         self.selection = self._empty_selection()
+
+    def clear_hover_position(self) -> None:
+        """Clear the frontend hover position."""
+
+        self.hover_position = self._empty_hover_position()
 
     def _load_from_base64(
         self,
@@ -453,6 +518,60 @@ class Image(DataService):
         if value < 0:
             raise ValueError(f"selection key {key!r} must be non-negative.")
         return value
+
+    def _normalise_hover_position(
+        self,
+        hover_position: Mapping[str, Any] | None,
+    ) -> ImageHoverPosition:
+        if hover_position is None:
+            return self._empty_hover_position()
+
+        if not isinstance(hover_position, Mapping):
+            raise TypeError(
+                "hover_position must be a dictionary-like object or None."
+            )
+
+        required_keys = {"x", "y", "hovering"}
+        missing_keys = required_keys - hover_position.keys()
+        if missing_keys:
+            missing_keys_str = ", ".join(sorted(missing_keys))
+            raise ValueError(
+                "hover_position is missing required key(s): "
+                f"{missing_keys_str}."
+            )
+
+        hovering = hover_position["hovering"]
+        if not isinstance(hovering, bool):
+            raise TypeError("hover_position key 'hovering' must be a bool.")
+
+        if not hovering:
+            return self._empty_hover_position()
+
+        return {
+            "x": self._normalise_hover_position_value("x", hover_position["x"]),
+            "y": self._normalise_hover_position_value("y", hover_position["y"]),
+            "hovering": True,
+        }
+
+    @staticmethod
+    def _empty_hover_position() -> ImageHoverPosition:
+        return {"x": 0, "y": 0, "hovering": False}
+
+    @staticmethod
+    def _normalise_hover_position_value(key: str, value: Any) -> int:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise TypeError(f"hover_position key {key!r} must be an integer.")
+        if value < 0:
+            raise ValueError(f"hover_position key {key!r} must be non-negative.")
+        return value
+
+    @staticmethod
+    def _normalise_hover_position_update_interval(value: float) -> float:
+        if not isinstance(value, int | float) or isinstance(value, bool):
+            raise TypeError("hover_position_update_interval must be a number.")
+        if value < 0:
+            raise ValueError("hover_position_update_interval must be non-negative.")
+        return float(value)
 
     def _get_raw_image_metadata(
         self,

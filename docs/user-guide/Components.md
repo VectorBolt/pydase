@@ -202,6 +202,13 @@ selection. The backend can read the selected image-pixel coordinates from
 `image.selection`, which contains `x`, `y`, `width`, and `height`. A zero width or
 height means that no selection is active.
 
+Images can also display hovered image-pixel coordinates with
+`Image(hover_position_enabled=True)`. The browser renders a small coordinate badge
+locally for smooth pointer movement, and the backend can read
+`image.hover_position`, which contains `x`, `y`, and `hovering`. Optional
+`on_hover_position_change` callbacks are throttled by
+`hover_position_update_interval` seconds, which defaults to `0.1`.
+
 ```python
 import matplotlib.pyplot as plt
 import numpy as np
@@ -209,8 +216,17 @@ import pydase
 from pydase.components.image import Image
 
 
+def print_hover_position(position):
+    if position["hovering"]:
+        print(position["x"], position["y"])
+
+
 class MyDataService(pydase.DataService):
-    my_image = Image(selection_enabled=True)
+    my_image = Image(
+        selection_enabled=True,
+        hover_position_enabled=True,
+        on_hover_position_change=print_hover_position,
+    )
 
 
 if __name__ == "__main__":
@@ -254,6 +270,9 @@ if __name__ == "__main__":
 
     # after a user drags in the frontend, the backend can read the selected box
     selected_box = service.my_image.selection
+
+    # while a user hovers, the backend can read the latest hover position
+    hover_position = service.my_image.hover_position
 
     # save the latest raw frame as PNG when needed
     service.my_image.save_to_png("/your/image/path/snapshot.png")
