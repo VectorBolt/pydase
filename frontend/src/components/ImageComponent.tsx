@@ -367,6 +367,22 @@ const selectionFromPoints = (start: ImagePoint, end: ImagePoint): ImageSelection
   };
 };
 
+const selectionsAreEqual = (
+  left: ImageSelection | null,
+  right: ImageSelection | null,
+): boolean => {
+  if (left === null || right === null) {
+    return left === right;
+  }
+
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height
+  );
+};
+
 const serializeSelection = (
   selection: ImageSelection | null,
   fullAccessPath: string,
@@ -503,6 +519,9 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
   const pendingBackendHoverPositionRef = useRef<ImagePoint | null>(null);
   const dragStartRef = useRef<ImagePoint | null>(null);
   const pointerIdRef = useRef<number | null>(null);
+  const pendingBackendSelectionRef = useRef<ImageSelection | null | undefined>(
+    undefined,
+  );
   const [draftSelection, setDraftSelection] = useState<ImageSelection | null>(null);
   const isRawImage = format.toUpperCase() === "RAW";
   const displayedSelection = draftSelection ?? selection;
@@ -512,6 +531,7 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
     selectionEnabled ||
     hoverPositionEnabled ||
     displayedSelection !== null;
+  const hasChangeCallback = props.changeCallback !== undefined;
 
   useEffect(() => {
     addNotification(`${fullAccessPath} changed.`);
@@ -582,12 +602,43 @@ export const ImageComponent = React.memo((props: ImageComponentProps) => {
   ]);
 
   useEffect(() => {
+    const pendingBackendSelection = pendingBackendSelectionRef.current;
+
+    if (pendingBackendSelection !== undefined) {
+      if (!selectionsAreEqual(selection, pendingBackendSelection)) {
+        return;
+      }
+      pendingBackendSelectionRef.current = undefined;
+    }
+
+    if (pointerIdRef.current !== null) {
+      return;
+    }
+
     setDraftSelection(null);
   }, [selection]);
 
   const updateBackendSelection = (nextSelection: ImageSelection | null) => {
+    if (hasChangeCallback) {
+      pendingBackendSelectionRef.current = nextSelection;
+    }
+
     changeCallback(
       serializeSelection(nextSelection, selectionAccessPath, selectionDocString),
+      (ack) => {
+        if (
+          !ack ||
+          typeof ack !== "object" ||
+          !("type" in ack) ||
+          ack.type !== "Exception"
+        ) {
+          return;
+        }
+
+        pendingBackendSelectionRef.current = undefined;
+        setDraftSelection(null);
+        addNotification(`Failed to update ${fullAccessPath}.selection.`, "ERROR");
+      },
     );
   };
 
