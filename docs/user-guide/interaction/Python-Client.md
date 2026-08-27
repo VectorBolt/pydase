@@ -114,7 +114,7 @@ In this example:
 
 ## Custom `socketio.AsyncClient` Connection Parameters
 
-You can configure advanced connection options by passing arguments to the underlying [`AsyncClient`][socketio.AsyncClient] via `sio_client_kwargs`. For example:
+You can configure advanced client options by passing arguments to the underlying [`AsyncClient`][socketio.AsyncClient] via `sio_client_kwargs`. For example:
 
 ```python
 client = pydase.Client(
@@ -128,3 +128,19 @@ client = pydase.Client(
 ```
 
 In this setup, the client will attempt to reconnect three times, with an initial delay of 2 seconds (each successive attempt doubles this delay) and a maximum delay of 10 seconds between attempts.
+
+Options for the underlying [`AsyncClient.connect`][socketio.AsyncClient.connect] call can be passed via `sio_connect_kwargs`. For example, to increase the Socket.IO namespace connect timeout:
+
+```python
+client = pydase.Client(
+    url="ws://localhost:8001",
+    sio_client_kwargs={
+        "handle_sigint": False,
+    },
+    sio_connect_kwargs={
+        "wait_timeout": 10,
+    },
+).proxy
+```
+
+The `wait_timeout` value controls how long the Socket.IO client waits for all namespaces to connect. The Socket.IO default is 1 second.

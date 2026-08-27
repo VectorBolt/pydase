@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from collections.abc import Generator
 from typing import Any
@@ -177,6 +178,48 @@ def test_client_id(
 
     pydase.Client(url="ws://localhost:9999", client_id="my_service")
     assert "Client [id=my_service] connected" in caplog.text
+
+
+def test_sio_connect_kwargs_are_passed_to_connect() -> None:
+    class SocketIOClientStub:
+        def __init__(self) -> None:
+            self.events: dict[str, Any] = {}
+            self.connect_kwargs: dict[str, Any] | None = None
+
+        def on(self, event: str, handler: Any) -> None:
+            self.events[event] = handler
+
+        async def connect(self, **kwargs: Any) -> None:
+            self.connect_kwargs = kwargs
+
+    socketio_client = SocketIOClientStub()
+    client = pydase.Client.__new__(pydase.Client)
+    client._url = "ws://localhost:9999/service"
+    client._base_url = "ws://localhost:9999"
+    client._path_prefix = "/service"
+    client._client_id = "test-client"
+    client._sio = socketio_client
+    client._sio_connect_kwargs = {
+        "auth": {"token": "secret"},
+        "wait_timeout": 5,
+    }
+    client._auto_update_proxy = False
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(client._connect())
+    finally:
+        loop.close()
+
+    assert socketio_client.connect_kwargs == {
+        "url": "ws://localhost:9999",
+        "headers": {"X-Client-Id": "test-client"},
+        "socketio_path": "/service/ws/socket.io",
+        "transports": ["websocket"],
+        "retry": True,
+        "auth": {"token": "secret"},
+        "wait_timeout": 5,
+    }
 
 
 def test_get_value(

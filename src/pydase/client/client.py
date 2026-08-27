@@ -63,6 +63,10 @@ class Client:
         sio_client_kwargs: Additional keyword arguments passed to the underlying
             [`AsyncClient`][socketio.AsyncClient]. This allows fine-tuning of the
             client's behaviour (e.g., reconnection attempts or reconnection delay).
+        sio_connect_kwargs: Additional keyword arguments passed to the underlying
+            [`AsyncClient.connect`][socketio.AsyncClient.connect] call. Use this for
+            connect-time options such as `wait_timeout`, which controls how long the
+            client waits for all Socket.IO namespaces to connect.
         client_id: An optional client identifier. This ID is sent to the server as the
             `X-Client-Id` HTTP header. It can be used for logging or authentication
             purposes on the server side. If not provided, it defaults to the hostname
@@ -105,7 +109,8 @@ class Client:
         *,
         url: str,
         block_until_connected: bool = True,
-        sio_client_kwargs: dict[str, Any] = {},
+        sio_client_kwargs: dict[str, Any] | None = None,
+        sio_connect_kwargs: dict[str, Any] | None = None,
         client_id: str | None = None,
         proxy_url: str | None = None,
         auto_update_proxy: bool = True,  # new argument
@@ -123,7 +128,8 @@ class Client:
         self._url = url
         self._proxy_url = proxy_url
         self._client_id = client_id or socket.gethostname()
-        self._sio_client_kwargs = sio_client_kwargs
+        self._sio_client_kwargs = dict(sio_client_kwargs or {})
+        self._sio_connect_kwargs = dict(sio_connect_kwargs or {})
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._auto_update_proxy = auto_update_proxy
@@ -219,13 +225,16 @@ class Client:
         if self._client_id is not None:
             headers["X-Client-Id"] = self._client_id
 
-        await self._sio.connect(
-            url=self._base_url,
-            headers=headers,
-            socketio_path=f"{self._path_prefix}/ws/socket.io",
-            transports=["websocket"],
-            retry=True,
-        )
+        connect_kwargs = {
+            "url": self._base_url,
+            "headers": headers,
+            "socketio_path": f"{self._path_prefix}/ws/socket.io",
+            "transports": ["websocket"],
+            "retry": True,
+            **self._sio_connect_kwargs,
+        }
+
+        await self._sio.connect(**connect_kwargs)
 
     async def _disconnect(self) -> None:
         await self._sio.disconnect()
